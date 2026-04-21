@@ -18,6 +18,7 @@ public struct DoctorSnapshot: Codable, Sendable {
     public let configurationPath: String
     public let configurationWarning: String?
     public let subscriptionAuthFilePath: String
+    public let authState: SubscriptionAuthState
     public let chatGPTAuthenticated: Bool
     public let accountIDSuffix: String?
     public let authError: String?
@@ -43,6 +44,7 @@ public struct DoctorSnapshot: Codable, Sendable {
         configurationPath: String,
         configurationWarning: String?,
         subscriptionAuthFilePath: String,
+        authState: SubscriptionAuthState,
         chatGPTAuthenticated: Bool,
         accountIDSuffix: String?,
         authError: String?,
@@ -67,6 +69,7 @@ public struct DoctorSnapshot: Codable, Sendable {
         self.configurationPath = configurationPath
         self.configurationWarning = configurationWarning
         self.subscriptionAuthFilePath = subscriptionAuthFilePath
+        self.authState = authState
         self.chatGPTAuthenticated = chatGPTAuthenticated
         self.accountIDSuffix = accountIDSuffix
         self.authError = authError

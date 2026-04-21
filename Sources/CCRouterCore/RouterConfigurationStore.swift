@@ -18,6 +18,9 @@ public struct RouterConfigurationStore {
     public func loadOrCreate() -> RouterConfiguration {
         let location = resolveConfigurationLocation()
         let storageURL = location.url
+        let homeWarning = UserHomeResolver.containerizationWarning(
+            fallbackHomeDirectoryURL: homeDirectoryURL
+        )
         let writeWarning: String?
         let stored: StoredConfiguration
 
@@ -38,7 +41,8 @@ public struct RouterConfigurationStore {
                 advisorModel: nil,
                 gatewayAuthToken: nil,
                 gatewayAuthHeader: nil,
-                subscriptionAuthFilePath: nil
+                subscriptionAuthFilePath: nil,
+                subscriptionAuthBookmarkData: nil
             ))
             stored = created
             writeWarning = persist(configuration: created, to: storageURL)
@@ -47,6 +51,7 @@ public struct RouterConfigurationStore {
         return resolveConfiguration(
             stored: stored,
             storageURL: storageURL,
+            homeWarning: homeWarning,
             locationWarning: location.warning,
             writeWarning: writeWarning
         )
@@ -66,13 +71,17 @@ public struct RouterConfigurationStore {
                 advisorModel: configuration.advisorModel,
                 gatewayAuthToken: configuration.gatewayAuthToken,
                 gatewayAuthHeader: configuration.gatewayAuthHeader,
-                subscriptionAuthFilePath: configuration.subscriptionAuthFilePath
+                subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
+                subscriptionAuthBookmarkData: configuration.subscriptionAuthBookmarkData
             )
         )
         let writeWarning = persist(configuration: stored, to: location.url)
         return resolveConfiguration(
             stored: stored,
             storageURL: location.url,
+            homeWarning: UserHomeResolver.containerizationWarning(
+                fallbackHomeDirectoryURL: homeDirectoryURL
+            ),
             locationWarning: location.warning,
             writeWarning: writeWarning
         )
@@ -92,6 +101,7 @@ public struct RouterConfigurationStore {
                 gatewayAuthToken: makeGatewayToken(),
                 gatewayAuthHeader: configuration.gatewayAuthHeader,
                 subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
+                subscriptionAuthBookmarkData: configuration.subscriptionAuthBookmarkData,
                 configurationPath: configuration.configurationPath,
                 configurationWarning: configuration.configurationWarning
             )
@@ -101,10 +111,11 @@ public struct RouterConfigurationStore {
     private func resolveConfiguration(
         stored: StoredConfiguration,
         storageURL: URL,
+        homeWarning: String?,
         locationWarning: String?,
         writeWarning: String?
     ) -> RouterConfiguration {
-        let warnings = [locationWarning, writeWarning].compactMap { $0 }.joined(separator: " ")
+        let warnings = [homeWarning, locationWarning, writeWarning].compactMap { $0 }.joined(separator: " ")
         return RouterConfiguration(
             host: environment["CC_ROUTER_HOST"] ?? stored.host ?? "127.0.0.1",
             port: parsePort(environment["CC_ROUTER_PORT"]) ?? stored.port ?? 4317,
@@ -116,7 +127,8 @@ public struct RouterConfigurationStore {
             advisorModel: environment["CC_ROUTER_ADVISOR_MODEL"] ?? stored.advisorModel ?? "gpt-5.4",
             gatewayAuthToken: environment["CC_ROUTER_GATEWAY_TOKEN"] ?? stored.gatewayAuthToken ?? makeGatewayToken(),
             gatewayAuthHeader: stored.gatewayAuthHeader ?? "x-api-key",
-            subscriptionAuthFilePath: environment["CC_ROUTER_SUBSCRIPTION_AUTH_FILE"] ?? stored.subscriptionAuthFilePath ?? homeDirectoryURL.appendingPathComponent(".codex/auth.json").path,
+            subscriptionAuthFilePath: resolvedSubscriptionAuthFilePath(storedPath: stored.subscriptionAuthFilePath),
+            subscriptionAuthBookmarkData: stored.subscriptionAuthBookmarkData,
             configurationPath: storageURL.path,
             configurationWarning: warnings.isEmpty ? nil : warnings
         )
@@ -147,7 +159,20 @@ public struct RouterConfigurationStore {
             advisorModel: configuration.advisorModel ?? environment["CC_ROUTER_ADVISOR_MODEL"] ?? "gpt-5.4",
             gatewayAuthToken: configuration.gatewayAuthToken ?? environment["CC_ROUTER_GATEWAY_TOKEN"] ?? makeGatewayToken(),
             gatewayAuthHeader: configuration.gatewayAuthHeader ?? "x-api-key",
-            subscriptionAuthFilePath: configuration.subscriptionAuthFilePath ?? environment["CC_ROUTER_SUBSCRIPTION_AUTH_FILE"] ?? homeDirectoryURL.appendingPathComponent(".codex/auth.json").path
+            subscriptionAuthFilePath: resolvedSubscriptionAuthFilePath(storedPath: configuration.subscriptionAuthFilePath),
+            subscriptionAuthBookmarkData: configuration.subscriptionAuthBookmarkData
+        )
+    }
+
+    private func resolvedSubscriptionAuthFilePath(storedPath: String?) -> String {
+        if let overridePath = environment["CC_ROUTER_SUBSCRIPTION_AUTH_FILE"], !overridePath.isEmpty {
+            return overridePath
+        }
+        if let storedPath, !storedPath.isEmpty, !UserHomeResolver.shouldReplaceContainerizedAuthPath(storedPath) {
+            return storedPath
+        }
+        return UserHomeResolver.defaultSubscriptionAuthFilePath(
+            fallbackHomeDirectoryURL: homeDirectoryURL
         )
     }
 
@@ -203,4 +228,5 @@ private struct StoredConfiguration: Codable {
     let gatewayAuthToken: String?
     let gatewayAuthHeader: String?
     let subscriptionAuthFilePath: String?
+    let subscriptionAuthBookmarkData: Data?
 }

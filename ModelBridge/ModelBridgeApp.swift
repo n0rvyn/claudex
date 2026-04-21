@@ -4,16 +4,27 @@ import CCRouterCore
 @main
 struct ModelBridgeApp: App {
     @StateObject private var model = AppModel()
+    @AppStorage("mb.appearance") private var appearanceRaw: Int = 0
+
+    private var preferredColorScheme: ColorScheme? {
+        switch appearanceRaw {
+        case 1: return .light
+        case 2: return .dark
+        default: return nil
+        }
+    }
 
     var body: some Scene {
         MenuBarExtra("ModelBridge", systemImage: "arrow.triangle.branch") {
             ContentView(model: model)
-                .frame(minWidth: 440, idealWidth: 456)
+                .preferredColorScheme(preferredColorScheme)
         }
+        .menuBarExtraStyle(.window)
 
         Settings {
             DoctorSettingsView(model: model)
-                .frame(minWidth: 920, minHeight: 700)
+                .frame(minWidth: 720, idealWidth: 820, minHeight: 560, idealHeight: 660)
+                .preferredColorScheme(preferredColorScheme)
         }
     }
 }

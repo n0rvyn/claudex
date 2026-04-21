@@ -4,6 +4,30 @@ import Testing
 
 struct TraceLoggerDiagnosticsTests {
     @Test
+    func logCreatesMissingParentDirectoryAndRecentLinesCanReadIt() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let traceURL = root
+            .appendingPathComponent("nested/trace.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let logger = TraceLogger(fileURL: traceURL)
+
+        await logger.log(
+            JSONObject.from([
+                "stage": .string("anthropic_in"),
+                "session_id": .string("session-create-dir"),
+            ])
+        )
+
+        let recentLines = await logger.recentLines(limit: 5)
+
+        #expect(FileManager.default.fileExists(atPath: traceURL.path))
+        #expect(recentLines.count == 1)
+        #expect(recentLines[0].contains("\"stage\":\"anthropic_in\""))
+    }
+
+    @Test
     func buildsConnectorSummaryFromRecentEvents() async throws {
         let traceURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)-trace.jsonl")
         defer { try? FileManager.default.removeItem(at: traceURL) }

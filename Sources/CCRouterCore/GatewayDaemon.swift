@@ -11,7 +11,8 @@ public actor GatewayDaemon {
         self.bridge = AnthropicBridge(
             configuration: configuration,
             sessionLoader: SubscriptionSessionLoader(
-                authFileURL: URL(fileURLWithPath: configuration.subscriptionAuthFilePath)
+                authFileURL: URL(fileURLWithPath: configuration.subscriptionAuthFilePath),
+                securityScopedBookmarkData: configuration.subscriptionAuthBookmarkData
             )
         )
     }
@@ -57,6 +58,7 @@ public actor GatewayDaemon {
             configurationPath: configuration.configurationPath,
             configurationWarning: configuration.configurationWarning,
             subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
+            authState: auth.authState,
             chatGPTAuthenticated: auth.chatGPTAuthenticated,
             accountIDSuffix: auth.accountIDSuffix,
             authError: auth.authError,
@@ -99,6 +101,7 @@ public actor GatewayDaemon {
                 configurationPath: configuration.configurationPath,
                 configurationWarning: configuration.configurationWarning,
                 subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
+                authState: auth.authState,
                 chatGPTAuthenticated: auth.chatGPTAuthenticated,
                 accountIDSuffix: auth.accountIDSuffix,
                 authError: auth.authError,

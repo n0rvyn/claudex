@@ -6,7 +6,11 @@ public actor TraceLogger {
     private let fileURL: URL
     private let timestampKey = "logged_at_unix_ms"
 
-    public init(fileURL: URL = URL(fileURLWithPath: "/tmp/modelbridge-trace.jsonl")) {
+    public init(
+        fileURL: URL = URL(
+            fileURLWithPath: UserHomeResolver.defaultTraceLogFilePath()
+        )
+    ) {
         self.fileURL = fileURL
     }
     private let decoder = JSONDecoder()
@@ -25,6 +29,10 @@ public actor TraceLogger {
         guard let line = String(data: data, encoding: .utf8) else { return }
         let output = line + "\n"
 
+        try? FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         if FileManager.default.fileExists(atPath: fileURL.path) == false {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         }

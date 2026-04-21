@@ -137,12 +137,21 @@ public actor AnthropicBridge {
         do {
             let credentials = try await sessionLoader.loadCurrent()
             return BridgeDoctorStatus(
+                authState: .ready,
                 chatGPTAuthenticated: true,
                 accountIDSuffix: String(credentials.accountID.suffix(6)),
                 authError: nil
             )
+        } catch let error as SubscriptionSessionError {
+            return BridgeDoctorStatus(
+                authState: error.authState,
+                chatGPTAuthenticated: false,
+                accountIDSuffix: nil,
+                authError: error.localizedDescription
+            )
         } catch {
             return BridgeDoctorStatus(
+                authState: .unknownFailure,
                 chatGPTAuthenticated: false,
                 accountIDSuffix: nil,
                 authError: error.localizedDescription
@@ -816,6 +825,7 @@ public actor AnthropicBridge {
 }
 
 public struct BridgeDoctorStatus: Sendable {
+    public let authState: SubscriptionAuthState
     public let chatGPTAuthenticated: Bool
     public let accountIDSuffix: String?
     public let authError: String?

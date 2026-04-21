@@ -3,18 +3,21 @@ import Combine
 import CCRouterCore
 import SwiftUI
 
+// MARK: - AppModel
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var daemonState = "stopped"
     @Published private(set) var endpoint = "http://127.0.0.1:4317"
     @Published private(set) var statusText = "ModelBridge daemon stopped"
+    @Published private(set) var authState: SubscriptionAuthState?
     @Published private(set) var authText = "Auth unknown"
     @Published private(set) var gatewayTokenText = "Token unknown"
     @Published private(set) var configurationPath = ""
     @Published private(set) var configurationWarning: String?
     @Published private(set) var subscriptionAuthFilePath = ""
     @Published private(set) var envSnippet = ""
-    @Published private(set) var tracePath = "/tmp/modelbridge-trace.jsonl"
+    @Published private(set) var tracePath = UserHomeResolver.defaultTraceLogFilePath()
     @Published private(set) var recentTraceLines: [String] = []
     @Published private(set) var doctorNotes: [String] = []
     @Published private(set) var traceStageCounts: [String: Int] = [:]
@@ -45,6 +48,7 @@ final class AppModel: ObservableObject {
     private let launchAtLoginController = LaunchAtLoginController()
     private var daemon: GatewayDaemon
     private var refreshCancellable: AnyCancellable?
+    private var subscriptionAuthBookmarkDataDraft: Data?
 
     init() {
         let configuration = RouterConfigurationStore().loadOrCreate()
@@ -55,6 +59,7 @@ final class AppModel: ObservableObject {
         self.executorModelDraft = configuration.executorModel
         self.advisorModelDraft = configuration.advisorModel
         self.subscriptionAuthFilePathDraft = configuration.subscriptionAuthFilePath
+        self.subscriptionAuthBookmarkDataDraft = configuration.subscriptionAuthBookmarkData
         self.daemon = GatewayDaemon(configuration: configuration)
         applyConfigurationStatus(configuration)
         syncDrafts(configuration)
@@ -68,24 +73,143 @@ final class AppModel: ObservableObject {
             }
     }
 
-    var daemonIsRunning: Bool {
-        daemonState == "running"
-    }
+    // MARK: Derived state
 
-    fileprivate var statusTone: DashboardTone {
-        if daemonState != "running" { return .warning }
-        if !isUpstreamReady { return .warning }
-        if recentFailureCount > 0 { return .danger }
-        return .success
-    }
+    var daemonIsRunning: Bool { daemonState == "running" }
 
     var isUpstreamReady: Bool {
-        authText.hasPrefix("ChatGPT auth ready")
+        authState?.isReady == true
     }
 
-    var reliabilityRate: Double {
-        guard recentRequestCount > 0 else { return 1 }
-        return Double(recentSuccessCount) / Double(recentRequestCount)
+    var requiresAuthAttention: Bool {
+        guard let authState else { return false }
+        return !authState.isReady
+    }
+
+    var canStartDaemon: Bool {
+        daemonIsRunning || isUpstreamReady
+    }
+
+    var primaryActionLabel: String {
+        if daemonIsRunning { return "Pause" }
+        switch authState {
+        case .authorizationRequired?:
+            return "Authorize"
+        case .bookmarkResolutionFailed?:
+            return "Reauthorize"
+        case .ready?:
+            return "Start"
+        case .none:
+            return "Checking"
+        default:
+            return "Fix auth"
+        }
+    }
+
+    var primaryActionSystemImage: String {
+        if daemonIsRunning { return "pause.fill" }
+        switch authState {
+        case .authorizationRequired?, .bookmarkResolutionFailed?:
+            return "key.horizontal"
+        case .ready?:
+            return "play.fill"
+        case .none:
+            return "hourglass"
+        default:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    var authResolutionLabel: String {
+        switch authState {
+        case .authorizationRequired?:
+            return "Authorize"
+        case .bookmarkResolutionFailed?:
+            return "Reauthorize"
+        case .ready?:
+            return "Authorized"
+        case .none:
+            return "Checking"
+        default:
+            return "Choose auth file"
+        }
+    }
+
+    var authResolutionSystemImage: String {
+        switch authState {
+        case .authorizationRequired?, .bookmarkResolutionFailed?, .none:
+            return "key.horizontal"
+        case .ready?:
+            return "checkmark.circle"
+        default:
+            return "folder.badge.questionmark"
+        }
+    }
+
+    var authActionTitle: String {
+        switch authState {
+        case .authorizationRequired?:
+            return "Authorize upstream auth"
+        case .bookmarkResolutionFailed?:
+            return "Reauthorize upstream auth"
+        case .authFileMissing?:
+            return "Auth file is missing"
+        case .authFileUnreadable?:
+            return "Auth file could not be read"
+        case .authFileInvalid?:
+            return "Auth file is invalid"
+        case .missingAccessToken?:
+            return "Auth file is missing access token"
+        case .missingAccountID?:
+            return "Auth file is missing account id"
+        case .unknownFailure?:
+            return "Auth check failed"
+        case .ready?:
+            return "Upstream auth ready"
+        case .none:
+            return "Checking upstream auth"
+        }
+    }
+
+    var authInstructionText: String {
+        "Click Authorize, then choose ~/.codex/auth.json from your home folder."
+    }
+
+    var headerDotState: MBDot.State {
+        if authState == nil { return .idle }
+        if requiresAuthAttention { return .warn }
+        if !daemonIsRunning { return .idle }
+        if !isUpstreamReady { return .warn }
+        if recentFailureCount > 0 { return .warn }
+        return .live
+    }
+
+    var headerStatusText: String {
+        switch authState {
+        case .none:
+            return "Checking upstream auth"
+        case .authorizationRequired?:
+            return "Authorize auth file to enable gateway"
+        case .bookmarkResolutionFailed?:
+            return "Reauthorize auth file"
+        case .authFileMissing?:
+            return "Auth file missing"
+        case .authFileUnreadable?:
+            return "Auth file unreadable"
+        case .authFileInvalid?:
+            return "Auth file invalid"
+        case .missingAccessToken?:
+            return "Auth file missing access token"
+        case .missingAccountID?:
+            return "Auth file missing account id"
+        case .unknownFailure?:
+            return "Auth check failed"
+        case .ready?:
+            break
+        }
+        if !daemonIsRunning { return "Gateway paused" }
+        if recentFailureCount > 0 { return "Gateway running · recent failures" }
+        return "Gateway running"
     }
 
     var errorRate: Double {
@@ -93,24 +217,71 @@ final class AppModel: ObservableObject {
         return Double(recentFailureCount) / Double(recentRequestCount)
     }
 
-    var heroSummary: String {
-        if daemonState != "running" {
-            return "Daemon offline"
-        }
-        if !isUpstreamReady {
-            return "Upstream attention needed"
-        }
-        if recentFailureCount > 0 {
-            return "Requests are reaching ModelBridge with recent failures"
-        }
-        return "Gateway healthy"
-    }
+    var successRate: Double { 1 - errorRate }
 
     var endpointShortLabel: String {
         endpoint.replacingOccurrences(of: "http://", with: "")
     }
 
+    var upstreamDisplayName: String {
+        guard let host = URL(string: currentConfiguration.responsesURL)?.host else { return "Upstream" }
+        if host.contains("chatgpt.com") { return "ChatGPT Codex" }
+        if host.contains("anthropic.com") { return "Anthropic" }
+        if host.contains("openai.com") { return "OpenAI" }
+        return host
+    }
+
+    var upstreamHostLabel: String {
+        URL(string: currentConfiguration.responsesURL)?.host ?? currentConfiguration.responsesURL
+    }
+
+    var appVersion: String {
+        let dict = Bundle.main.infoDictionary
+        let short = dict?["CFBundleShortVersionString"] as? String
+        let build = dict?["CFBundleVersion"] as? String
+        switch (short, build) {
+        case let (s?, b?): return "v\(s) (\(b))"
+        case let (s?, _):  return "v\(s)"
+        case let (_, b?):  return "build \(b)"
+        default:           return "dev"
+        }
+    }
+
+    var formattedRequestsPerMinute: String {
+        String(format: "%.1f", requestsPerMinute)
+    }
+
+    var latencySummary: String {
+        let p50 = p50LatencyMilliseconds.map { "\($0) ms" } ?? "n/a"
+        let p95 = p95LatencyMilliseconds.map { "\($0) ms" } ?? "n/a"
+        return "\(p50) / \(p95)"
+    }
+
+    var diagnosticsSummary: String {
+        [
+            "Daemon: \(daemonState)",
+            "Endpoint: \(endpoint)",
+            "Auth: \(authText)",
+            "Last request: \(lastRequestOutcome)",
+            "Requests: \(recentRequestCount)",
+            "Successes: \(recentSuccessCount)",
+            "Failures: \(recentFailureCount)",
+            "Requests/min: \(formattedRequestsPerMinute)",
+            "Latency p50/p95: \(latencySummary)",
+            "Connectors: \(recentConnectorNames.joined(separator: ", "))",
+            "Function calls: \(recentFunctionCallNames.joined(separator: ", "))",
+            "Errors: \(recentErrorReasons.joined(separator: " | "))",
+            "Trace: \(tracePath)",
+        ].joined(separator: "\n")
+    }
+
+    // MARK: Actions
+
     func startDaemon() {
+        guard canStartDaemon else {
+            resolveAuthBlockingState(for: "starting the gateway")
+            return
+        }
         Task {
             do {
                 try await daemon.start()
@@ -124,13 +295,23 @@ final class AppModel: ObservableObject {
     func stopDaemon() {
         Task {
             await daemon.stop()
-            daemonState = "stopped"
-            statusText = "ModelBridge daemon stopped"
-            authText = "Auth unknown"
+            await refreshSnapshot(runningText: "ModelBridge daemon stopped")
+        }
+    }
+
+    func toggleDaemon() {
+        if daemonIsRunning {
+            stopDaemon()
+        } else {
+            startDaemon()
         }
     }
 
     func restartDaemon() {
+        guard canStartDaemon else {
+            resolveAuthBlockingState(for: "restarting the gateway")
+            return
+        }
         Task {
             await daemon.stop()
             daemon = GatewayDaemon(configuration: currentConfiguration)
@@ -150,6 +331,10 @@ final class AppModel: ObservableObject {
     }
 
     func copyEnvSnippet() {
+        guard isUpstreamReady else {
+            resolveAuthBlockingState(for: "copying the Claude environment")
+            return
+        }
         copyToPasteboard(envSnippet)
         statusText = "Claude environment copied"
     }
@@ -169,16 +354,54 @@ final class AppModel: ObservableObject {
         statusText = "Diagnostics summary copied"
     }
 
-    func openConfigurationLocation() {
-        revealPath(configurationPath)
+    func openConfigurationLocation() { revealPath(configurationPath) }
+    func openSubscriptionAuthLocation() { revealPath(subscriptionAuthFilePath) }
+    func openTraceLocation() { revealPath(tracePath) }
+
+    func updateSubscriptionAuthFilePathDraft(_ path: String) {
+        subscriptionAuthFilePathDraft = path
+        if path != currentConfiguration.subscriptionAuthFilePath {
+            subscriptionAuthBookmarkDataDraft = nil
+        }
     }
 
-    func openSubscriptionAuthLocation() {
-        revealPath(subscriptionAuthFilePath)
-    }
+    func chooseSubscriptionAuthFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+        let suggestedURL = URL(
+            fileURLWithPath: UserHomeResolver.defaultSubscriptionAuthFilePath()
+        )
+        panel.directoryURL = suggestedURL.deletingLastPathComponent()
+        panel.nameFieldStringValue = suggestedURL.lastPathComponent
 
-    func openTraceLocation() {
-        revealPath(tracePath)
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+        statusText = "Validating auth file authorization"
+        Task {
+            do {
+                let bookmarkData = try selectedURL.bookmarkData(
+                    options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                _ = try await SubscriptionSessionLoader(
+                    authFileURL: selectedURL,
+                    securityScopedBookmarkData: bookmarkData
+                ).loadCurrent()
+                subscriptionAuthFilePathDraft = selectedURL.path
+                subscriptionAuthBookmarkDataDraft = bookmarkData
+                await persistSubscriptionAuthAuthorization(
+                    path: selectedURL.path,
+                    bookmarkData: bookmarkData
+                )
+            } catch {
+                statusText = "Auth file authorization failed: \(error.localizedDescription)"
+                syncDrafts(currentConfiguration)
+                await refreshSnapshot(runningText: statusText)
+            }
+        }
     }
 
     func openApplicationSupportDirectory() {
@@ -191,6 +414,7 @@ final class AppModel: ObservableObject {
             statusText = "Port must be between 1 and 65535"
             return
         }
+        guard canPersistDraftAuthPath() else { return }
         persistConfiguration(
             host: gatewayHostDraft,
             port: port,
@@ -198,6 +422,7 @@ final class AppModel: ObservableObject {
             executorModel: executorModelDraft,
             advisorModel: advisorModelDraft,
             subscriptionAuthFilePath: subscriptionAuthFilePathDraft,
+            subscriptionAuthBookmarkData: subscriptionAuthBookmarkDataDraft,
             statusMessage: "Gateway settings saved"
         )
     }
@@ -207,6 +432,7 @@ final class AppModel: ObservableObject {
             statusText = "Port must be between 1 and 65535"
             return
         }
+        guard canPersistDraftAuthPath() else { return }
         persistConfiguration(
             host: gatewayHostDraft,
             port: port,
@@ -214,6 +440,7 @@ final class AppModel: ObservableObject {
             executorModel: executorModelDraft,
             advisorModel: advisorModelDraft,
             subscriptionAuthFilePath: subscriptionAuthFilePathDraft,
+            subscriptionAuthBookmarkData: subscriptionAuthBookmarkDataDraft,
             statusMessage: "Upstream settings saved"
         )
     }
@@ -248,6 +475,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func quit() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: Private
+
     private func persistConfiguration(
         host: String,
         port: Int,
@@ -255,6 +488,7 @@ final class AppModel: ObservableObject {
         executorModel: String,
         advisorModel: String,
         subscriptionAuthFilePath: String,
+        subscriptionAuthBookmarkData: Data?,
         statusMessage: String
     ) {
         Task {
@@ -272,6 +506,7 @@ final class AppModel: ObservableObject {
                     gatewayAuthToken: currentConfiguration.gatewayAuthToken,
                     gatewayAuthHeader: currentConfiguration.gatewayAuthHeader,
                     subscriptionAuthFilePath: subscriptionAuthFilePath,
+                    subscriptionAuthBookmarkData: subscriptionAuthBookmarkData,
                     configurationPath: currentConfiguration.configurationPath,
                     configurationWarning: currentConfiguration.configurationWarning
                 )
@@ -280,6 +515,33 @@ final class AppModel: ObservableObject {
             syncDrafts(saved)
             statusText = wasRunning ? "\(statusMessage); daemon restarted" : statusMessage
         }
+    }
+
+    private func persistSubscriptionAuthAuthorization(path: String, bookmarkData: Data) async {
+        let wasRunning = daemonIsRunning
+        let saved = configurationStore.save(
+            configuration: RouterConfiguration(
+                host: currentConfiguration.host,
+                port: currentConfiguration.port,
+                healthPath: currentConfiguration.healthPath,
+                messagesPath: currentConfiguration.messagesPath,
+                countTokensPath: currentConfiguration.countTokensPath,
+                responsesURL: currentConfiguration.responsesURL,
+                executorModel: currentConfiguration.executorModel,
+                advisorModel: currentConfiguration.advisorModel,
+                gatewayAuthToken: currentConfiguration.gatewayAuthToken,
+                gatewayAuthHeader: currentConfiguration.gatewayAuthHeader,
+                subscriptionAuthFilePath: path,
+                subscriptionAuthBookmarkData: bookmarkData,
+                configurationPath: currentConfiguration.configurationPath,
+                configurationWarning: currentConfiguration.configurationWarning
+            )
+        )
+        await replaceDaemon(with: saved, restartIfRunning: wasRunning)
+        syncDrafts(saved)
+        statusText = wasRunning
+            ? "Auth file authorized; daemon restarted"
+            : "Auth file authorized"
     }
 
     private func replaceDaemon(with configuration: RouterConfiguration, restartIfRunning: Bool) async {
@@ -309,6 +571,7 @@ final class AppModel: ObservableObject {
         configurationPath = snapshot.configurationPath
         configurationWarning = snapshot.configurationWarning
         subscriptionAuthFilePath = snapshot.subscriptionAuthFilePath
+        authState = snapshot.authState
         gatewayTokenText = "\(snapshot.gatewayAuthHeader) ready (\(snapshot.gatewayAuthTokenSuffix))"
         traceStageCounts = snapshot.traceDiagnostics.recentStageCounts
         recentFunctionCallNames = snapshot.traceDiagnostics.recentFunctionCallNames
@@ -349,6 +612,7 @@ final class AppModel: ObservableObject {
         executorModelDraft = configuration.executorModel
         advisorModelDraft = configuration.advisorModel
         subscriptionAuthFilePathDraft = configuration.subscriptionAuthFilePath
+        subscriptionAuthBookmarkDataDraft = configuration.subscriptionAuthBookmarkData
     }
 
     private func makeDoctorNotes(configurationWarning: String?) -> [String] {
@@ -357,7 +621,6 @@ final class AppModel: ObservableObject {
             "ModelBridge forwards Anthropic Messages to chatgpt.com/backend-api/codex/responses.",
             "Ingress auth is enforced through x-api-key.",
             "Settings changes restart the daemon automatically when it is already running.",
-            "Validated paths include default text, Bash, Read, advisor, and Notion auth.",
         ]
         if let configurationWarning, !configurationWarning.isEmpty {
             notes.append(configurationWarning)
@@ -368,6 +631,35 @@ final class AppModel: ObservableObject {
     private func refreshLaunchAtLogin() {
         launchAtLoginEnabled = launchAtLoginController.isEnabled
         launchAtLoginText = launchAtLoginController.statusText
+    }
+
+    private func canPersistDraftAuthPath() -> Bool {
+        let authPathChanged = subscriptionAuthFilePathDraft != currentConfiguration.subscriptionAuthFilePath
+        if authPathChanged && subscriptionAuthBookmarkDataDraft == nil {
+            statusText = "Use Choose to authorize the auth file before saving this path"
+            return false
+        }
+        return true
+    }
+
+    private func resolveAuthBlockingState(for action: String) {
+        guard let authState else {
+            statusText = "Checking auth state before \(action)"
+            refresh()
+            return
+        }
+        switch authState {
+        case .ready:
+            return
+        case .authorizationRequired, .bookmarkResolutionFailed,
+             .authFileMissing, .authFileUnreadable, .authFileInvalid,
+             .missingAccessToken, .missingAccountID:
+            statusText = "Fix upstream auth before \(action)"
+            chooseSubscriptionAuthFile()
+        case .unknownFailure:
+            statusText = "Resolve upstream auth failure before \(action)"
+            refresh()
+        }
     }
 
     private func copyToPasteboard(_ value: String) {
@@ -386,1014 +678,369 @@ final class AppModel: ObservableObject {
 
     private func humanizeOutcome(_ outcome: String?) -> String {
         switch outcome {
-        case "initial":
-            return "Last request completed"
-        case "advisor_or_tools":
-            return "Tool or advisor path active"
-        case "continuation":
-            return "Continuation completed"
-        case "responses_http_error":
-            return "Upstream HTTP error"
-        case "subscription_error":
-            return "Subscription auth error"
-        case "decode_or_bridge_error":
-            return "Gateway request error"
-        case "auth_rejected":
-            return "Local auth rejected"
-        case nil:
-            return "No recent request"
-        default:
-            return outcome ?? "No recent request"
+        case "initial":                return "Last request completed"
+        case "advisor_or_tools":       return "Tool or advisor path active"
+        case "continuation":           return "Continuation completed"
+        case "responses_http_error":   return "Upstream HTTP error"
+        case "subscription_error":     return "Subscription auth error"
+        case "decode_or_bridge_error": return "Gateway request error"
+        case "auth_rejected":          return "Local auth rejected"
+        case nil:                      return "No recent request"
+        default:                       return outcome ?? "No recent request"
         }
     }
-
-    var diagnosticsSummary: String {
-        [
-            "Daemon: \(daemonState)",
-            "Endpoint: \(endpoint)",
-            "Auth: \(authText)",
-            "Last request: \(lastRequestOutcome)",
-            "Requests: \(recentRequestCount)",
-            "Successes: \(recentSuccessCount)",
-            "Failures: \(recentFailureCount)",
-            "Requests/min: \(formattedRequestsPerMinute)",
-            "Latency p50/p95: \(latencySummary)",
-            "Connectors: \(recentConnectorNames.joined(separator: ", "))",
-            "Function calls: \(recentFunctionCallNames.joined(separator: ", "))",
-            "Errors: \(recentErrorReasons.joined(separator: " | "))",
-            "Trace: \(tracePath)",
-        ].joined(separator: "\n")
-    }
-
-    var formattedRequestsPerMinute: String {
-        String(format: "%.1f", requestsPerMinute)
-    }
-
-    var latencySummary: String {
-        let p50 = p50LatencyMilliseconds.map { "\($0) ms" } ?? "n/a"
-        let p95 = p95LatencyMilliseconds.map { "\($0) ms" } ?? "n/a"
-        return "\(p50) / \(p95)"
-    }
 }
+
+// MARK: - Menu bar popover (ContentView)
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
 
-    private let columns = [
-        GridItem(.flexible(), spacing: DashboardTokens.gridSpacing),
-        GridItem(.flexible(), spacing: DashboardTokens.gridSpacing),
-        GridItem(.flexible(), spacing: DashboardTokens.gridSpacing),
-    ]
-
     var body: some View {
-        ZStack {
-            DashboardPalette.canvas.ignoresSafeArea()
+        VStack(spacing: 0) {
+            headerSection
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
+                .overlay(Divider().frame(height: 0.5), alignment: .bottom)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: DashboardTokens.sectionSpacing) {
-                    DashboardHeroCard(model: model)
+            bridgeSection
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
 
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: DashboardTokens.gridSpacing) {
-                        MetricCard(
-                            title: "Traffic",
-                            value: "\(model.recentRequestCount)",
-                            detail: "\(model.formattedRequestsPerMinute) req/min",
-                            symbol: "waveform.path.ecg.rectangle",
-                            tone: .info
-                        )
-                        MetricCard(
-                            title: "Latency",
-                            value: model.lastLatencyMilliseconds.map { "\($0) ms" } ?? "n/a",
-                            detail: "p50/p95 \(model.latencySummary)",
-                            symbol: "timer",
-                            tone: .accent
-                        )
-                        MetricCard(
-                            title: "Reliability",
-                            value: PercentFormatter.string(for: 1 - model.errorRate),
-                            detail: "\(model.recentFailureCount) recent failure\(model.recentFailureCount == 1 ? "" : "s")",
-                            symbol: "checkmark.shield",
-                            tone: model.recentFailureCount > 0 ? .warning : .success
-                        )
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    HStack(alignment: .top, spacing: DashboardTokens.gridSpacing) {
-                        ActivityCard(
-                            title: "Runtime Activity",
-                            subtitle: "Recent tools and connector activity",
-                            items: activityRows,
-                            tone: .accent
-                        )
-                        ActivityCard(
-                            title: "Operational Notes",
-                            subtitle: "Live issues and guidance",
-                            items: noteRows,
-                            tone: model.recentFailureCount > 0 ? .warning : .info
-                        )
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    FeedCard(
-                        title: "Live Feed",
-                        subtitle: "Recent trace events from the local gateway",
-                        lines: model.recentTraceLines
-                    )
-
-                    DashboardActionBar(model: model)
-                }
-                .padding(DashboardTokens.outerPadding)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if model.requiresAuthAttention {
+                authActionSection
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
             }
+
+            kpiSection
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+
+            recentSection
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+
+            footerSection
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(MBColor.paperDim)
+                .overlay(Divider().frame(height: 0.5), alignment: .top)
         }
+        .frame(width: 380)
+        .background(MBColor.paper)
     }
 
-    private var activityRows: [ActivityRow] {
-        var rows: [ActivityRow] = []
-        if !model.recentFunctionCallNames.isEmpty {
-            rows.append(ActivityRow(
-                title: "Tools",
-                value: model.recentFunctionCallNames.prefix(4).joined(separator: ", "),
-                tone: .accent
+    // MARK: Sections
+
+    private var headerSection: some View {
+        HStack(alignment: .center, spacing: 10) {
+            MBBridgeBadge(size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Model Bridge")
+                    .font(MBFont.title)
+                    .foregroundStyle(MBColor.ink)
+                HStack(spacing: 6) {
+                    MBDot(state: model.headerDotState, size: 6)
+                    Text(model.headerStatusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(MBColor.inkDim)
+                        .lineLimit(1)
+                    Text("·").foregroundStyle(MBColor.inkFaint)
+                    Text(model.appVersion)
+                        .font(MBFont.monoSmall)
+                        .foregroundStyle(MBColor.inkDim)
+                }
+            }
+            Spacer(minLength: 0)
+            Toggle("", isOn: Binding(
+                get: { model.daemonIsRunning },
+                set: { _ in model.toggleDaemon() }
             ))
-        }
-        if !model.recentConnectorNames.isEmpty {
-            rows.append(ActivityRow(
-                title: "Connectors",
-                value: model.recentConnectorNames.prefix(4).joined(separator: ", "),
-                tone: .success
-            ))
-        }
-        if !model.recentRejectedPaths.isEmpty {
-            rows.append(ActivityRow(
-                title: "Rejected Paths",
-                value: model.recentRejectedPaths.prefix(3).joined(separator: ", "),
-                tone: .warning
-            ))
-        }
-        if rows.isEmpty {
-            rows.append(ActivityRow(title: "Runtime", value: "No recent tool or connector activity", tone: .info))
-        }
-        return rows
-    }
-
-    private var noteRows: [ActivityRow] {
-        var rows = [
-            ActivityRow(title: "Status", value: model.statusText, tone: model.statusTone),
-            ActivityRow(title: "Auth", value: model.authText, tone: model.isUpstreamReady ? .success : .warning),
-        ]
-        if let configurationWarning = model.configurationWarning, !configurationWarning.isEmpty {
-            rows.append(ActivityRow(title: "Config", value: configurationWarning, tone: .warning))
-        }
-        if !model.recentErrorReasons.isEmpty {
-            rows.append(ActivityRow(title: "Recent Errors", value: model.recentErrorReasons.prefix(2).joined(separator: " • "), tone: .danger))
-        }
-        return rows
-    }
-}
-
-struct DoctorSettingsView: View {
-    @ObservedObject var model: AppModel
-    @State private var selectedTab = SettingsTab.overview
-
-    var body: some View {
-        ZStack {
-            DashboardPalette.settingsCanvas.ignoresSafeArea()
-
-            TabView(selection: $selectedTab) {
-                SettingsTabShell(
-                    title: "Overview",
-                    subtitle: "Current system state, health summary, and the fastest path into the local routing stack."
-                ) {
-                    OverviewSettingsTab(model: model)
-                }
-                .tag(SettingsTab.overview)
-                .tabItem {
-                    Label("Overview", systemImage: "rectangle.grid.1x2")
-                }
-
-                SettingsTabShell(
-                    title: "Gateway",
-                    subtitle: "Control the local daemon, endpoint, token lifecycle, and runtime boundary."
-                ) {
-                    GatewaySettingsTab(model: model)
-                }
-                .tag(SettingsTab.gateway)
-                .tabItem {
-                    Label("Gateway", systemImage: "dot.radiowaves.left.and.right")
-                }
-
-                SettingsTabShell(
-                    title: "Claude Code",
-                    subtitle: "Use these values directly with Claude Code through ANTHROPIC_BASE_URL."
-                ) {
-                    ClaudeCodeSettingsTab(model: model)
-                }
-                .tag(SettingsTab.claudeCode)
-                .tabItem {
-                    Label("Claude Code", systemImage: "terminal")
-                }
-
-                SettingsTabShell(
-                    title: "Upstream",
-                    subtitle: "Manage the subscription-backed execution path and model selection."
-                ) {
-                    UpstreamSettingsTab(model: model)
-                }
-                .tag(SettingsTab.upstream)
-                .tabItem {
-                    Label("Upstream", systemImage: "network")
-                }
-
-                SettingsTabShell(
-                    title: "Diagnostics",
-                    subtitle: "Inspect trace health, request outcomes, connector activity, and exportable diagnostics."
-                ) {
-                    DiagnosticsSettingsTab(model: model)
-                }
-                .tag(SettingsTab.diagnostics)
-                .tabItem {
-                    Label("Diagnostics", systemImage: "waveform.and.magnifyingglass")
-                }
-
-                SettingsTabShell(
-                    title: "Advanced",
-                    subtitle: "System-level behaviors, launch options, and low-frequency maintenance actions."
-                ) {
-                    AdvancedSettingsTab(model: model)
-                }
-                .tag(SettingsTab.advanced)
-                .tabItem {
-                    Label("Advanced", systemImage: "gearshape.2")
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .toggleStyle(MBToggleStyle())
+            .labelsHidden()
+            .fixedSize()
+            .disabled(!model.canStartDaemon)
         }
     }
-}
 
-private enum SettingsTab: Hashable {
-    case overview
-    case gateway
-    case claudeCode
-    case upstream
-    case diagnostics
-    case advanced
-}
-
-private enum DashboardTone {
-    case success
-    case warning
-    case danger
-    case accent
-    case info
-
-    var color: Color {
-        switch self {
-        case .success:
-            return DashboardPalette.success
-        case .warning:
-            return DashboardPalette.warning
-        case .danger:
-            return DashboardPalette.danger
-        case .accent:
-            return DashboardPalette.accent
-        case .info:
-            return DashboardPalette.info
-        }
-    }
-}
-
-private enum DashboardTokens {
-    static let outerPadding: CGFloat = 18
-    static let sectionSpacing: CGFloat = 16
-    static let gridSpacing: CGFloat = 12
-    static let cardPadding: CGFloat = 16
-    static let cornerRadius: CGFloat = 22
-    static let smallCornerRadius: CGFloat = 16
-    static let feedHeight: CGFloat = 220
-}
-
-private enum DashboardPalette {
-    static let canvas = Color(nsColor: .windowBackgroundColor)
-    static let settingsCanvas = Color(nsColor: .underPageBackgroundColor)
-    static let elevated = Color(nsColor: .controlBackgroundColor)
-    static let secondarySurface = Color.black.opacity(0.10)
-    static let ink = Color.white.opacity(0.96)
-    static let mutedInk = Color.white.opacity(0.72)
-    static let quietInk = Color.primary.opacity(0.72)
-    static let accent = Color(red: 0.27, green: 0.68, blue: 0.98)
-    static let info = Color(red: 0.40, green: 0.75, blue: 0.98)
-    static let success = Color(red: 0.29, green: 0.82, blue: 0.55)
-    static let warning = Color(red: 0.96, green: 0.71, blue: 0.25)
-    static let danger = Color(red: 0.98, green: 0.43, blue: 0.38)
-    static let heroGradient = LinearGradient(
-        colors: [
-            Color(red: 0.10, green: 0.13, blue: 0.22),
-            Color(red: 0.12, green: 0.29, blue: 0.42),
-            Color(red: 0.08, green: 0.42, blue: 0.44),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-    static let dashboardCardGradient = LinearGradient(
-        colors: [
-            Color(red: 0.16, green: 0.18, blue: 0.23),
-            Color(red: 0.12, green: 0.14, blue: 0.18),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-    static let settingsCard = Color(nsColor: .windowBackgroundColor)
-}
-
-private struct DashboardHeroCard: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("ModelBridge")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DashboardPalette.ink)
-                    Text(model.heroSummary)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(DashboardPalette.mutedInk)
-                }
-                Spacer()
-                StatusBadge(title: model.daemonIsRunning ? "Live" : "Idle", tone: model.statusTone)
-            }
-
-            HStack(spacing: 8) {
-                StatusBadge(title: model.daemonIsRunning ? "Daemon Online" : "Daemon Offline", tone: model.daemonIsRunning ? .success : .warning)
-                StatusBadge(title: model.isUpstreamReady ? "Upstream Ready" : "Upstream Missing", tone: model.isUpstreamReady ? .success : .warning)
-                StatusBadge(title: model.lastRequestOutcome, tone: model.recentFailureCount > 0 ? .warning : .accent)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                KeyValuePill(label: "Endpoint", value: model.endpointShortLabel)
-                HStack(spacing: 10) {
-                    KeyValuePill(label: "Executor", value: model.currentConfiguration.executorModel)
-                    KeyValuePill(label: "Advisor", value: model.currentConfiguration.advisorModel)
-                }
-            }
-
-            Text(model.statusText)
-                .font(.footnote)
-                .foregroundStyle(DashboardPalette.mutedInk)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(DashboardTokens.cardPadding)
-        .frame(maxWidth: .infinity)
-        .background(DashboardPalette.heroGradient, in: RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-private struct MetricCard: View {
-    let title: String
-    let value: String
-    let detail: String
-    let symbol: String
-    let tone: DashboardTone
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label(title, systemImage: symbol)
-                    .font(.caption)
-                    .foregroundStyle(DashboardPalette.mutedInk)
-                Spacer()
-                Circle()
-                    .fill(tone.color)
-                    .frame(width: 9, height: 9)
-            }
-
-            Text(value)
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .foregroundStyle(DashboardPalette.ink)
-
-            Text(detail)
-                .font(.footnote)
-                .foregroundStyle(DashboardPalette.mutedInk)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(DashboardTokens.cardPadding)
-        .frame(maxWidth: .infinity, minHeight: 138, alignment: .topLeading)
-        .background(DashboardPalette.dashboardCardGradient, in: RoundedRectangle(cornerRadius: DashboardTokens.smallCornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DashboardTokens.smallCornerRadius, style: .continuous)
-                .stroke(tone.color.opacity(0.28), lineWidth: 1)
-        )
-    }
-}
-
-private struct ActivityRow: Identifiable {
-    let id = UUID()
-    let title: String
-    let value: String
-    let tone: DashboardTone
-}
-
-private struct ActivityCard: View {
-    let title: String
-    let subtitle: String
-    let items: [ActivityRow]
-    let tone: DashboardTone
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(DashboardPalette.ink)
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(DashboardPalette.mutedInk)
-            }
-
-            ForEach(items) { item in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(item.title)
-                            .font(.caption)
-                            .foregroundStyle(DashboardPalette.mutedInk)
-                        Spacer()
-                        Circle()
-                            .fill(item.tone.color)
-                            .frame(width: 8, height: 8)
-                    }
-                    Text(item.value)
-                        .font(.subheadline)
-                        .foregroundStyle(DashboardPalette.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-        }
-        .padding(DashboardTokens.cardPadding)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(DashboardPalette.dashboardCardGradient, in: RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous)
-                .stroke(tone.color.opacity(0.20), lineWidth: 1)
-        )
-    }
-}
-
-private struct FeedCard: View {
-    let title: String
-    let subtitle: String
-    let lines: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(DashboardPalette.ink)
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(DashboardPalette.mutedInk)
-            }
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    if lines.isEmpty {
-                        Text("No recent trace events yet.")
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundStyle(DashboardPalette.mutedInk)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(DashboardPalette.ink)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxWidth: .infinity, minHeight: DashboardTokens.feedHeight, maxHeight: DashboardTokens.feedHeight)
-            .padding(12)
-            .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: DashboardTokens.smallCornerRadius, style: .continuous))
-        }
-        .padding(DashboardTokens.cardPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DashboardPalette.dashboardCardGradient, in: RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-private struct DashboardActionBar: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ActionButton(
-                title: model.daemonIsRunning ? "Restart" : "Start",
-                systemImage: model.daemonIsRunning ? "arrow.clockwise" : "play.fill",
-                tone: .accent
-            ) {
-                if model.daemonIsRunning {
-                    model.restartDaemon()
-                } else {
-                    model.startDaemon()
-                }
-            }
-
-            ActionButton(title: "Refresh", systemImage: "arrow.trianglehead.clockwise", tone: .info) {
-                model.refresh()
-            }
-
-            ActionButton(title: "Copy Env", systemImage: "doc.on.doc", tone: .success) {
-                model.copyEnvSnippet()
-            }
-
-            SettingsLink {
-                Label("Settings", systemImage: "slider.horizontal.3")
-                    .font(.subheadline.weight(.medium))
+    private var bridgeSection: some View {
+        MBCard(padding: 10) {
+            HStack(spacing: 10) {
+                clientCell
+                MBFlowLine(running: model.daemonIsRunning, color: MBColor.live)
                     .frame(maxWidth: .infinity)
+                upstreamCell
             }
-            .buttonStyle(ActionButtonStyle(tone: .warning))
         }
-        .frame(maxWidth: .infinity)
     }
-}
 
-private struct SettingsTabShell<Content: View>: View {
-    let title: String
-    let subtitle: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                content
+    private var clientCell: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(model.daemonIsRunning ? MBColor.live : MBColor.inkFaint)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Claude Code")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MBColor.ink)
+                Text(model.endpointShortLabel)
+                    .font(MBFont.monoSmall)
+                    .foregroundStyle(MBColor.inkDim)
             }
-            .padding(24)
+        }
+        .frame(width: 132, alignment: .leading)
+    }
+
+    private var upstreamCell: some View {
+        HStack(spacing: 6) {
+            Spacer(minLength: 0)
+            MBPill(text: model.upstreamDisplayName, tone: .neutral)
+        }
+        .frame(maxWidth: 120)
+    }
+
+    private var kpiSection: some View {
+        MBCard(padding: 12, background: MBColor.paperDim) {
+            HStack(alignment: .top, spacing: 14) {
+                MBKpi(
+                    label: "Requests",
+                    value: "\(model.recentRequestCount)",
+                    detail: "\(model.formattedRequestsPerMinute) / min"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle().fill(MBColor.ruleSoft).frame(width: 0.5)
+
+                MBKpi(
+                    label: "Success",
+                    value: model.recentRequestCount == 0 ? "—" : percentString(model.successRate),
+                    detail: model.recentRequestCount == 0
+                        ? MBCopy.trafficEmptyShort
+                        : "\(model.recentSuccessCount) ok · \(model.recentFailureCount) err",
+                    tone: model.recentFailureCount > 0 ? .warn : .live
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle().fill(MBColor.ruleSoft).frame(width: 0.5)
+
+                MBKpi(
+                    label: "Latency",
+                    value: lastLatencyDisplay,
+                    detail: latencyDetail
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var authActionSection: some View {
+        MBCard(padding: 12, background: MBColor.paperDim) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "key.horizontal")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MBColor.brand)
+                    Text(model.authActionTitle)
+                        .font(MBFont.labelB)
+                        .foregroundStyle(MBColor.ink)
+                }
+                Text(model.authText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(MBColor.inkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(model.authInstructionText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(MBColor.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button(action: { model.chooseSubscriptionAuthFile() }) {
+                        Label(model.authResolutionLabel, systemImage: model.authResolutionSystemImage)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    SettingsLink {
+                        Label("Open Settings", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MBColor.brand)
+                }
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
-}
 
-private struct OverviewSettingsTab: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "System Summary", subtitle: "The shortest path to current runtime state.") {
-                VStack(alignment: .leading, spacing: 10) {
-                    SummaryLine(label: "Daemon", value: model.daemonState)
-                    SummaryLine(label: "Endpoint", value: model.endpoint)
-                    SummaryLine(label: "Auth", value: model.authText)
-                    SummaryLine(label: "Last request", value: model.lastRequestOutcome)
-                    SummaryLine(label: "Requests/min", value: model.formattedRequestsPerMinute)
-                    SummaryLine(label: "Latency", value: model.latencySummary)
-                }
-            }
-
-            SettingsCard(title: "Quick Actions", subtitle: "Common operations without opening the menu bar dashboard.") {
-                HStack(spacing: 12) {
-                    PrimarySettingsButton(title: model.daemonIsRunning ? "Restart Daemon" : "Start Daemon", systemImage: model.daemonIsRunning ? "arrow.clockwise" : "play.fill") {
-                        if model.daemonIsRunning {
-                            model.restartDaemon()
-                        } else {
-                            model.startDaemon()
-                        }
-                    }
-                    SecondarySettingsButton(title: "Copy Env", systemImage: "doc.on.doc") {
-                        model.copyEnvSnippet()
-                    }
-                    SecondarySettingsButton(title: "Open Trace", systemImage: "text.append") {
-                        model.openTraceLocation()
-                    }
-                }
-            }
-
-            SettingsCard(title: "Routing Path", subtitle: "This is the fixed product path of ModelBridge.") {
-                CodeBlock(value: "Claude Code CLI -> ANTHROPIC_BASE_URL -> ModelBridge -> chatgpt.com/backend-api/codex/responses")
-            }
-        }
-    }
-}
-
-private struct GatewaySettingsTab: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "Local Gateway", subtitle: "Host, port, daemon control, and ingress token lifecycle.") {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsTextField(title: "Host", text: $model.gatewayHostDraft)
-                    SettingsTextField(title: "Port", text: $model.gatewayPortDraft)
-                    SummaryLine(label: "Current endpoint", value: model.endpoint)
-                    SummaryLine(label: "Gateway token", value: model.gatewayTokenText)
-                }
-            }
-
-            SettingsCard(title: "Gateway Actions", subtitle: "Changes here restart the daemon automatically when it is already running.") {
-                HStack(spacing: 12) {
-                    PrimarySettingsButton(title: "Save Gateway", systemImage: "tray.and.arrow.down") {
-                        model.saveGatewaySettings()
-                    }
-                    SecondarySettingsButton(title: "Regenerate Token", systemImage: "key") {
-                        model.regenerateGatewayToken()
-                    }
-                    SecondarySettingsButton(title: "Copy Endpoint", systemImage: "link") {
-                        model.copyEndpoint()
-                    }
-                    SecondarySettingsButton(title: "Copy Token", systemImage: "lock.doc") {
-                        model.copyGatewayToken()
-                    }
-                }
-            }
-
-            SettingsCard(title: "Configuration Files", subtitle: "Useful local paths for support and inspection.") {
-                VStack(alignment: .leading, spacing: 10) {
-                    CodeBlock(value: model.configurationPath)
-                    HStack(spacing: 12) {
-                        SecondarySettingsButton(title: "Reveal Config", systemImage: "folder") {
-                            model.openConfigurationLocation()
-                        }
-                        SecondarySettingsButton(title: "Reveal Support Folder", systemImage: "folder.badge.gearshape") {
-                            model.openApplicationSupportDirectory()
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct ClaudeCodeSettingsTab: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "Claude CLI Environment", subtitle: "Use this exact snippet with Claude Code.") {
-                CodeBlock(value: model.envSnippet)
-            }
-
-            SettingsCard(title: "Copy Helpers", subtitle: "The fastest way to move from configuration to active Claude sessions.") {
-                HStack(spacing: 12) {
-                    PrimarySettingsButton(title: "Copy Full Env", systemImage: "doc.on.doc") {
-                        model.copyEnvSnippet()
-                    }
-                    SecondarySettingsButton(title: "Copy Base URL", systemImage: "network") {
-                        model.copyEndpoint()
-                    }
-                    SecondarySettingsButton(title: "Copy Token", systemImage: "key") {
-                        model.copyGatewayToken()
-                    }
-                }
-            }
-
-            SettingsCard(title: "Verified Usage", subtitle: "Current validated operational path.") {
-                CodeBlock(value: "ANTHROPIC_BASE_URL=\(model.endpoint)\nANTHROPIC_AUTH_TOKEN=<gateway-token>\nclaude --bare -p --output-format json 'Reply exactly SMOKEOK.'")
-            }
-        }
-    }
-}
-
-private struct UpstreamSettingsTab: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "Subscription Runtime", subtitle: "These values define the ChatGPT/Codex-backed execution path.") {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsTextField(title: "Responses URL", text: $model.responsesURLDraft)
-                    SettingsTextField(title: "Executor Model", text: $model.executorModelDraft)
-                    SettingsTextField(title: "Advisor Model", text: $model.advisorModelDraft)
-                    SettingsTextField(title: "Subscription Auth File", text: $model.subscriptionAuthFilePathDraft)
-                    SummaryLine(label: "Auth state", value: model.authText)
-                }
-            }
-
-            SettingsCard(title: "Upstream Actions", subtitle: "Model and auth-file changes are saved to the local configuration.") {
-                HStack(spacing: 12) {
-                    PrimarySettingsButton(title: "Save Upstream", systemImage: "tray.and.arrow.down") {
-                        model.saveUpstreamSettings()
-                    }
-                    SecondarySettingsButton(title: "Reveal Auth File", systemImage: "person.badge.key") {
-                        model.openSubscriptionAuthLocation()
-                    }
-                    SecondarySettingsButton(title: "Reload Config", systemImage: "arrow.clockwise.circle") {
-                        model.reloadPersistedConfiguration()
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct DiagnosticsSettingsTab: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "Request Health", subtitle: "Recent runtime metrics derived from local trace telemetry.") {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    CompactMetric(title: "Requests", value: "\(model.recentRequestCount)")
-                    CompactMetric(title: "Success", value: "\(model.recentSuccessCount)")
-                    CompactMetric(title: "Failure", value: "\(model.recentFailureCount)")
-                    CompactMetric(title: "Error Rate", value: PercentFormatter.string(for: model.errorRate))
-                    CompactMetric(title: "p50", value: model.p50LatencyMilliseconds.map { "\($0) ms" } ?? "n/a")
-                    CompactMetric(title: "p95", value: model.p95LatencyMilliseconds.map { "\($0) ms" } ?? "n/a")
-                }
-                .frame(maxWidth: .infinity)
-            }
-
-            SettingsCard(title: "Connector Diagnostics", subtitle: "Recent stages, function calls, connector activity, and rejected paths.") {
-                VStack(alignment: .leading, spacing: 10) {
-                    SummaryLine(label: "Stages", value: formatStagePairs(model.traceStageCounts))
-                    SummaryLine(label: "Function calls", value: joinedOrFallback(model.recentFunctionCallNames))
-                    SummaryLine(label: "Connectors", value: joinedOrFallback(model.recentConnectorNames))
-                    SummaryLine(label: "Rejected paths", value: joinedOrFallback(model.recentRejectedPaths))
-                    SummaryLine(label: "Recent errors", value: joinedOrFallback(model.recentErrorReasons))
-                }
-            }
-
-            SettingsCard(title: "Trace Access", subtitle: "Use these controls when runtime inspection moves beyond the dashboard.") {
-                CodeBlock(value: model.tracePath)
-                HStack(spacing: 12) {
-                    PrimarySettingsButton(title: "Copy Diagnostics", systemImage: "doc.text.magnifyingglass") {
-                        model.copyDiagnosticsSummary()
-                    }
-                    SecondarySettingsButton(title: "Reveal Trace", systemImage: "text.append") {
-                        model.openTraceLocation()
-                    }
-                }
-            }
-
-            SettingsCard(title: "Recent Events", subtitle: "Latest raw lines from the local trace feed.") {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(model.recentTraceLines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct AdvancedSettingsTab: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard(title: "System Integration", subtitle: "Low-frequency system behaviors for packaged app usage.") {
-                SummaryLine(label: "Launch at login", value: model.launchAtLoginText)
-                HStack(spacing: 12) {
-                    PrimarySettingsButton(title: model.launchAtLoginEnabled ? "Disable Launch at Login" : "Enable Launch at Login", systemImage: "power") {
-                        model.toggleLaunchAtLogin()
-                    }
-                    SecondarySettingsButton(title: "Restart Daemon", systemImage: "arrow.clockwise") {
-                        model.restartDaemon()
-                    }
-                }
-            }
-
-            SettingsCard(title: "Operational Notes", subtitle: "Current runtime guidance and warnings from the app.") {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(model.doctorNotes, id: \.self) { note in
-                        Text(note)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct SettingsCard<Content: View>: View {
-    let title: String
-    let subtitle: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            content
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DashboardPalette.settingsCard, in: RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DashboardTokens.cornerRadius, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-private struct SettingsTextField: View {
-    let title: String
-    @Binding var text: String
-
-    var body: some View {
+    private var recentSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextField(title, text: $text)
-                .textFieldStyle(.roundedBorder)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct CodeBlock: View {
-    let value: String
-
-    var body: some View {
-        Text(value)
-            .font(.system(.footnote, design: .monospaced))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: DashboardTokens.smallCornerRadius, style: .continuous))
-    }
-}
-
-private struct SummaryLine: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-        }
-    }
-}
-
-private struct CompactMetric: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: DashboardTokens.smallCornerRadius, style: .continuous))
-    }
-}
-
-private struct StatusBadge: View {
-    let title: String
-    let tone: DashboardTone
-
-    var body: some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(tone.color.opacity(0.88), in: Capsule(style: .continuous))
-    }
-}
-
-private struct KeyValuePill: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(DashboardPalette.mutedInk)
-            Text(value)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(DashboardPalette.ink)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct ActionButton: View {
-    let title: String
-    let systemImage: String
-    let tone: DashboardTone
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(ActionButtonStyle(tone: tone))
-    }
-}
-
-private struct ActionButtonStyle: ButtonStyle {
-    let tone: DashboardTone
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(tone.color.opacity(configuration.isPressed ? 0.55 : 0.82))
+            MBSectionHeader(
+                title: "Recent activity",
+                trailing: AnyView(
+                    Button(action: { model.openTraceLocation() }) {
+                        HStack(spacing: 3) {
+                            Text("Open trace")
+                            Image(systemName: "arrow.up.right")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MBColor.brand)
+                )
             )
-            .foregroundStyle(Color.white)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .padding(.horizontal, 4)
+
+            MBCard(padding: 0) {
+                VStack(spacing: 0) {
+                    if recentLines.isEmpty {
+                        Text(MBCopy.trafficEmptyLong)
+                            .font(.system(size: 11))
+                            .foregroundStyle(MBColor.inkDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    } else {
+                        ForEach(Array(recentLines.enumerated()), id: \.offset) { index, line in
+                            let summary = TraceLineFormatter.summary(line)
+                            HStack(spacing: 8) {
+                                MBDot(state: summary.toneForStatus, size: 5)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(summary.message)
+                                        .font(MBFont.mono)
+                                        .foregroundStyle(MBColor.ink)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    if let ts = summary.timestamp {
+                                        Text(ts)
+                                            .font(MBFont.monoSmall)
+                                            .foregroundStyle(MBColor.inkDim)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                if let code = summary.statusCode {
+                                    Text("\(code)")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(code >= 400 ? MBColor.faultInk : MBColor.inkDim)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(code >= 400 ? MBColor.faultSoft : MBColor.paperDim)
+                                        )
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            if index < recentLines.count - 1 {
+                                Rectangle().fill(MBColor.ruleSoft).frame(height: 0.5)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var footerSection: some View {
+        HStack(spacing: 6) {
+            FooterButton(
+                systemImage: model.primaryActionSystemImage,
+                label: model.primaryActionLabel,
+                action: {
+                    if model.daemonIsRunning {
+                        model.toggleDaemon()
+                    } else if model.isUpstreamReady {
+                        model.toggleDaemon()
+                    } else {
+                        model.chooseSubscriptionAuthFile()
+                    }
+                },
+                isDisabled: model.authState == nil
+            )
+            FooterButton(
+                systemImage: "doc.on.doc",
+                label: "Copy env",
+                action: { model.copyEnvSnippet() },
+                isDisabled: !model.isUpstreamReady
+            )
+            Spacer(minLength: 0)
+            SettingsLink {
+                FooterButtonLabel(systemImage: "gearshape", label: "Settings")
+            }
+            .buttonStyle(.plain)
+            FooterButton(
+                systemImage: "rectangle.portrait.and.arrow.right",
+                label: "Quit",
+                action: { model.quit() }
+            )
+        }
+    }
+
+    // MARK: Helpers
+
+    private var recentLines: [String] {
+        Array(model.recentTraceLines.suffix(5).reversed())
+    }
+
+    private var lastLatencyDisplay: String {
+        if let last = model.lastLatencyMilliseconds { return "\(last) ms" }
+        if let p50 = model.p50LatencyMilliseconds { return "\(p50) ms" }
+        return "—"
+    }
+
+    private var latencyDetail: String {
+        if let p95 = model.p95LatencyMilliseconds { return "p95 \(p95) ms" }
+        if let p50 = model.p50LatencyMilliseconds { return "p50 \(p50) ms" }
+        return "No samples"
+    }
+
+    private func percentString(_ value: Double) -> String {
+        let bounded = max(0, min(1, value))
+        return String(format: "%.0f%%", bounded * 100)
     }
 }
 
-private struct PrimarySettingsButton: View {
-    let title: String
+// MARK: - Footer button
+
+private struct FooterButton: View {
     let systemImage: String
+    let label: String
     let action: () -> Void
+    var isDisabled = false
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
+            FooterButtonLabel(systemImage: systemImage, label: label)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1)
     }
 }
 
-private struct SecondarySettingsButton: View {
-    let title: String
+private struct FooterButtonLabel: View {
     let systemImage: String
-    let action: () -> Void
+    let label: String
+
+    @State private var hovered = false
 
     var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
+        .foregroundStyle(MBColor.ink)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(hovered ? MBColor.paperAlt : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(hovered ? MBColor.rule : Color.clear, lineWidth: 0.5)
+        )
+        .onHover { hovered = $0 }
     }
-}
-
-private struct PercentFormatter {
-    static func string(for value: Double) -> String {
-        String(format: "%.0f%%", max(0, min(1, value)) * 100)
-    }
-}
-
-private func formatStagePairs(_ values: [String: Int]) -> String {
-    guard !values.isEmpty else { return "No recent stages" }
-    return values.keys.sorted().map { key in
-        "\(key)=\(values[key] ?? 0)"
-    }
-    .joined(separator: ", ")
-}
-
-private func joinedOrFallback(_ values: [String]) -> String {
-    values.isEmpty ? "No recent activity" : values.joined(separator: ", ")
 }

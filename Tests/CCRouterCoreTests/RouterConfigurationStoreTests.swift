@@ -75,6 +75,7 @@ struct RouterConfigurationStoreTests {
             gatewayAuthToken: initial.gatewayAuthToken,
             gatewayAuthHeader: initial.gatewayAuthHeader,
             subscriptionAuthFilePath: tempRoot.appendingPathComponent("auth-2.json").path,
+            subscriptionAuthBookmarkData: Data("bookmark".utf8),
             configurationPath: initial.configurationPath,
             configurationWarning: initial.configurationWarning
         )
@@ -86,5 +87,65 @@ struct RouterConfigurationStoreTests {
         #expect(saved.executorModel == "gpt-5.5")
         #expect(saved.advisorModel == "gpt-5.5")
         #expect(saved.subscriptionAuthFilePath.hasSuffix("/auth-2.json"))
+        #expect(saved.subscriptionAuthBookmarkData == Data("bookmark".utf8))
+    }
+
+    @Test
+    func containerizedHomeDefaultsBackToRealUserAuthPath() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let configPath = tempRoot.appendingPathComponent("config.json").path
+        let containerizedHome = URL(
+            fileURLWithPath: "/Users/tester/Library/Containers/com.90percent.ModelBridge/Data",
+            isDirectory: true
+        )
+        let store = RouterConfigurationStore(
+            environment: ["CC_ROUTER_CONFIG_PATH": configPath],
+            fileManager: .default,
+            homeDirectoryURL: containerizedHome
+        )
+
+        let configuration = store.loadOrCreate()
+
+        #expect(
+            configuration.subscriptionAuthFilePath
+                == UserHomeResolver.defaultSubscriptionAuthFilePath(
+                    fallbackHomeDirectoryURL: containerizedHome
+                )
+        )
+        #expect(configuration.configurationWarning?.contains("App Sandbox") == true)
+    }
+
+    @Test
+    func containerizedStoredAuthPathIsNormalizedBackToRealUserHome() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let configPathURL = tempRoot.appendingPathComponent("config.json")
+        let containerizedHome = URL(
+            fileURLWithPath: "/Users/tester/Library/Containers/com.90percent.ModelBridge/Data",
+            isDirectory: true
+        )
+        let legacyStoredPath = containerizedHome.appendingPathComponent(".codex/auth.json").path
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        try Data("{\"subscriptionAuthFilePath\":\"\(legacyStoredPath)\"}".utf8)
+            .write(to: configPathURL)
+
+        let store = RouterConfigurationStore(
+            environment: ["CC_ROUTER_CONFIG_PATH": configPathURL.path],
+            fileManager: .default,
+            homeDirectoryURL: containerizedHome
+        )
+
+        let configuration = store.loadOrCreate()
+
+        #expect(configuration.subscriptionAuthFilePath != legacyStoredPath)
+        #expect(
+            configuration.subscriptionAuthFilePath
+                == UserHomeResolver.defaultSubscriptionAuthFilePath(
+                    fallbackHomeDirectoryURL: containerizedHome
+                )
+        )
     }
 }

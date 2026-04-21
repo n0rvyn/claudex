@@ -13,7 +13,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var configurationWarning: String?
     @Published private(set) var subscriptionAuthFilePath = ""
     @Published private(set) var envSnippet = ""
-    @Published private(set) var tracePath = "/tmp/modelbridge-trace.jsonl"
+    @Published private(set) var tracePath = UserHomeResolver.defaultTraceLogFilePath()
     @Published private(set) var recentTraceLines: [String] = []
     @Published private(set) var doctorNotes: [String] = []
     @Published private(set) var traceStageCounts: [String: Int] = [:]

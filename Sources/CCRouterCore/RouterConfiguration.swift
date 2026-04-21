@@ -12,6 +12,7 @@ public struct RouterConfiguration: Codable, Sendable, Equatable {
     public let gatewayAuthToken: String
     public let gatewayAuthHeader: String
     public let subscriptionAuthFilePath: String
+    public let subscriptionAuthBookmarkData: Data?
     public let configurationPath: String
     public let configurationWarning: String?
 
@@ -27,6 +28,7 @@ public struct RouterConfiguration: Codable, Sendable, Equatable {
         gatewayAuthToken: String,
         gatewayAuthHeader: String,
         subscriptionAuthFilePath: String,
+        subscriptionAuthBookmarkData: Data? = nil,
         configurationPath: String,
         configurationWarning: String?
     ) {
@@ -41,6 +43,7 @@ public struct RouterConfiguration: Codable, Sendable, Equatable {
         self.gatewayAuthToken = gatewayAuthToken
         self.gatewayAuthHeader = gatewayAuthHeader
         self.subscriptionAuthFilePath = subscriptionAuthFilePath
+        self.subscriptionAuthBookmarkData = subscriptionAuthBookmarkData
         self.configurationPath = configurationPath
         self.configurationWarning = configurationWarning
     }
