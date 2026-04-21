@@ -1,0 +1,83 @@
+#!/usr/bin/expect -f
+
+if {$argc < 3} {
+    puts stderr "usage: probe_interactive_codex.expect <cases.tsv> <transcript.log> -- <command...>"
+    exit 64
+}
+
+set cases_path [lindex $argv 0]
+set transcript_path [lindex $argv 1]
+set separator_index -1
+for {set i 2} {$i < $argc} {incr i} {
+    if {[lindex $argv $i] eq "--"} {
+        set separator_index $i
+        break
+    }
+}
+if {$separator_index < 0 || $separator_index == $argc - 1} {
+    puts stderr "missing command after --"
+    exit 64
+}
+
+set cmd [lrange $argv [expr {$separator_index + 1}] end]
+set timeout 240
+match_max 1048576
+
+log_user 0
+spawn -noecho /usr/bin/script -q $transcript_path {*}$cmd
+
+proc wait_for_startup {} {
+    expect {
+        -re "OpenAI Codex" { return }
+        -re "Find and fix a bug in @filename" { return }
+        -re "Starting MCP servers" { exp_continue }
+        timeout { return }
+        eof {
+            puts stderr "process exited before startup"
+            exit 65
+        }
+    }
+}
+
+proc run_case {prompt expected index} {
+    send -- "$prompt\r"
+    expect {
+        -exact $expected { return }
+        timeout {
+            puts stderr "timeout waiting for case $index marker: $expected"
+            exit 70
+        }
+        eof {
+            puts stderr "process exited during case $index"
+            exit 71
+        }
+    }
+}
+
+wait_for_startup
+after 8000
+
+set handle [open $cases_path r]
+set index 0
+while {[gets $handle line] >= 0} {
+    if {[string trim $line] eq ""} {
+        continue
+    }
+    if {[string match "#*" [string trimleft $line]]} {
+        continue
+    }
+    set parts [split $line "\t"]
+    if {[llength $parts] != 2} {
+        puts stderr "invalid cases.tsv line: $line"
+        exit 66
+    }
+    incr index
+    set prompt [lindex $parts 0]
+    set expected [lindex $parts 1]
+    run_case $prompt $expected $index
+    after 1500
+}
+close $handle
+
+send -- "\003"
+expect eof
