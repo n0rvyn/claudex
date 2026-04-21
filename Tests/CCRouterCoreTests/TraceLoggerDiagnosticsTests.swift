@@ -9,9 +9,18 @@ struct TraceLoggerDiagnosticsTests {
         defer { try? FileManager.default.removeItem(at: traceURL) }
 
         let logger = TraceLogger(fileURL: traceURL)
+        let baseTimestamp = Int(Date().timeIntervalSince1970 * 1000)
 
         await logger.log(
             JSONObject.from([
+                "logged_at_unix_ms": .number(Double(baseTimestamp)),
+                "stage": .string("anthropic_in"),
+                "session_id": .string("session-1"),
+            ])
+        )
+        await logger.log(
+            JSONObject.from([
+                "logged_at_unix_ms": .number(Double(baseTimestamp + 180)),
                 "stage": .string("responses_in"),
                 "function_calls": .array([
                     .object(JSONObject.from([
@@ -27,6 +36,24 @@ struct TraceLoggerDiagnosticsTests {
         )
         await logger.log(
             JSONObject.from([
+                "logged_at_unix_ms": .number(Double(baseTimestamp + 240)),
+                "stage": .string("anthropic_out"),
+                "session_id": .string("session-1"),
+                "status_code": .number(200),
+                "result": .string("initial"),
+                "duration_ms": .number(240),
+            ])
+        )
+        await logger.log(
+            JSONObject.from([
+                "logged_at_unix_ms": .number(Double(baseTimestamp + 300)),
+                "stage": .string("anthropic_in"),
+                "session_id": .string("session-2"),
+            ])
+        )
+        await logger.log(
+            JSONObject.from([
+                "logged_at_unix_ms": .number(Double(baseTimestamp + 320)),
                 "stage": .string("local_auth_reject"),
                 "path": .string("/v1/messages"),
             ])
@@ -39,5 +66,14 @@ struct TraceLoggerDiagnosticsTests {
         #expect(diagnostics.recentFunctionCallNames.contains("Bash"))
         #expect(diagnostics.recentConnectorNames.contains("mcp__plugin_Notion_notion__authenticate"))
         #expect(diagnostics.recentRejectedPaths.contains("/v1/messages"))
+        #expect(diagnostics.recentRequestCount == 2)
+        #expect(diagnostics.recentSuccessCount == 1)
+        #expect(diagnostics.recentFailureCount == 1)
+        #expect(diagnostics.lastRequestOutcome == "auth_rejected")
+        #expect(diagnostics.lastLatencyMilliseconds == 240)
+        #expect(diagnostics.p50LatencyMilliseconds == 240)
+        #expect(diagnostics.p95LatencyMilliseconds == 240)
+        #expect(diagnostics.requestsPerMinute > 0)
+        #expect(diagnostics.recentErrorReasons.contains("Local auth rejected: /v1/messages"))
     }
 }

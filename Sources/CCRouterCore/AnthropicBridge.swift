@@ -20,10 +20,11 @@ public actor AnthropicBridge {
     }
 
     public func handleMessages(_ request: HTTPRequest) async -> HTTPResponse {
+        let sessionID = request.headers["x-claude-code-session-id"] ?? UUID().uuidString.lowercased()
+        let startedAtUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
         do {
             let anthropicRequest = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: request.body)
             let credentials = try await sessionLoader.loadCurrent()
-            let sessionID = request.headers["x-claude-code-session-id"] ?? UUID().uuidString.lowercased()
             await TraceLogger.shared.log(
                 JSONObject.from([
                     "stage": .string("anthropic_in"),
@@ -52,7 +53,7 @@ public actor AnthropicBridge {
                     ])
                 )
                 let events = try await responsesClient.perform(request: continuationPayload, credentials: credentials)
-                return try await finalizeResponse(
+                let response = try await finalizeResponse(
                     events: events,
                     anthropicModel: pending.anthropicModel,
                     sessionID: sessionID,
@@ -60,6 +61,13 @@ public actor AnthropicBridge {
                     advisorEnabled: pending.advisorEnabled,
                     credentials: credentials
                 )
+                await logRequestOutcome(
+                    sessionID: sessionID,
+                    response: response,
+                    startedAtUptimeNanoseconds: startedAtUptimeNanoseconds,
+                    result: "continuation"
+                )
+                return response
             }
 
             let initial = try buildInitialPayload(from: anthropicRequest)
@@ -74,7 +82,7 @@ public actor AnthropicBridge {
                 ])
             )
             let events = try await responsesClient.perform(request: initial.payload, credentials: credentials)
-            return try await finalizeResponse(
+            let response = try await finalizeResponse(
                 events: events,
                 anthropicModel: anthropicRequest.model,
                 sessionID: sessionID,
@@ -82,12 +90,46 @@ public actor AnthropicBridge {
                 advisorEnabled: initial.advisorEnabled,
                 credentials: credentials
             )
+            await logRequestOutcome(
+                sessionID: sessionID,
+                response: response,
+                startedAtUptimeNanoseconds: startedAtUptimeNanoseconds,
+                result: initial.advisorEnabled ? "advisor_or_tools" : "initial"
+            )
+            return response
         } catch let error as ResponsesHTTPError {
-            return anthropicError(statusCode: error.statusCode, errorType: error.statusCode >= 500 ? "api_error" : "invalid_request_error", message: error.body)
+            let response = anthropicError(statusCode: error.statusCode, errorType: error.statusCode >= 500 ? "api_error" : "invalid_request_error", message: error.body)
+            await logRequestOutcome(
+                sessionID: sessionID,
+                response: response,
+                startedAtUptimeNanoseconds: startedAtUptimeNanoseconds,
+                result: "responses_http_error",
+                errorType: error.statusCode >= 500 ? "api_error" : "invalid_request_error",
+                errorMessage: error.body
+            )
+            return response
         } catch let error as SubscriptionSessionError {
-            return anthropicError(statusCode: 503, errorType: "api_error", message: error.localizedDescription)
+            let response = anthropicError(statusCode: 503, errorType: "api_error", message: error.localizedDescription)
+            await logRequestOutcome(
+                sessionID: sessionID,
+                response: response,
+                startedAtUptimeNanoseconds: startedAtUptimeNanoseconds,
+                result: "subscription_error",
+                errorType: "api_error",
+                errorMessage: error.localizedDescription
+            )
+            return response
         } catch {
-            return anthropicError(statusCode: 400, errorType: "invalid_request_error", message: error.localizedDescription)
+            let response = anthropicError(statusCode: 400, errorType: "invalid_request_error", message: error.localizedDescription)
+            await logRequestOutcome(
+                sessionID: sessionID,
+                response: response,
+                startedAtUptimeNanoseconds: startedAtUptimeNanoseconds,
+                result: "decode_or_bridge_error",
+                errorType: "invalid_request_error",
+                errorMessage: error.localizedDescription
+            )
+            return response
         }
     }
 
@@ -729,6 +771,29 @@ public actor AnthropicBridge {
                 ])
             ),
         ])
+    }
+
+    private func logRequestOutcome(
+        sessionID: String,
+        response: HTTPResponse,
+        startedAtUptimeNanoseconds: UInt64,
+        result: String,
+        errorType: String? = nil,
+        errorMessage: String? = nil
+    ) async {
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAtUptimeNanoseconds
+        let durationMilliseconds = Int(elapsedNanoseconds / 1_000_000)
+        await TraceLogger.shared.log(
+            JSONObject.from([
+                "stage": .string("anthropic_out"),
+                "session_id": .string(sessionID),
+                "status_code": .number(Double(response.statusCode)),
+                "result": .string(result),
+                "duration_ms": .number(Double(durationMilliseconds)),
+                "error_type": errorType.map(JSONValue.string) ?? .null,
+                "error_message": errorMessage.map(JSONValue.string) ?? .null,
+            ])
+        )
     }
 
     private func anthropicError(statusCode: Int, errorType: String, message: String) -> HTTPResponse {

@@ -25,6 +25,13 @@ The current verified path is:
 - `TraceLogger` records runtime traces to `/tmp/modelbridge-trace.jsonl`
 - The menu bar app surfaces daemon state, doctor information, connector diagnostics, and the exact Claude env snippet
 
+## Start Here
+
+If a new Codex or Claude session needs immediate context, start with:
+
+- `docs/00-session-brief.md`
+- `docs/scheme3/README.md`
+
 ## Repository Layout
 
 - `ModelBridge/`: Xcode macOS app target
@@ -138,6 +145,7 @@ Local development works with ad hoc signing. Public distribution still needs:
 
 See:
 
+- `docs/00-session-brief.md`
 - `docs/scheme3/README.md`
 - `docs/06-plans/2026-04-21-modelbridge-distribution-followups.md`
 - `docs/06-plans/2026-04-21-modelbridge-signing-notarization-runbook.md`

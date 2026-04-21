@@ -2,6 +2,10 @@
 
 Date: 2026-04-20
 
+先读：
+
+- [docs/00-session-brief.md](/Users/norvyn/Code/Projects/ModelBridge/docs/00-session-brief.md)
+
 ## 1. 目标
 
 本目录只服务一个目标：

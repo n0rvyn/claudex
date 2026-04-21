@@ -52,6 +52,52 @@ public struct RouterConfigurationStore {
         )
     }
 
+    public func save(configuration: RouterConfiguration) -> RouterConfiguration {
+        let location = resolveConfigurationLocation()
+        let stored = normalizedConfiguration(
+            from: StoredConfiguration(
+                host: configuration.host,
+                port: configuration.port,
+                healthPath: configuration.healthPath,
+                messagesPath: configuration.messagesPath,
+                countTokensPath: configuration.countTokensPath,
+                responsesURL: configuration.responsesURL,
+                executorModel: configuration.executorModel,
+                advisorModel: configuration.advisorModel,
+                gatewayAuthToken: configuration.gatewayAuthToken,
+                gatewayAuthHeader: configuration.gatewayAuthHeader,
+                subscriptionAuthFilePath: configuration.subscriptionAuthFilePath
+            )
+        )
+        let writeWarning = persist(configuration: stored, to: location.url)
+        return resolveConfiguration(
+            stored: stored,
+            storageURL: location.url,
+            locationWarning: location.warning,
+            writeWarning: writeWarning
+        )
+    }
+
+    public func regenerateGatewayToken(from configuration: RouterConfiguration) -> RouterConfiguration {
+        save(
+            configuration: RouterConfiguration(
+                host: configuration.host,
+                port: configuration.port,
+                healthPath: configuration.healthPath,
+                messagesPath: configuration.messagesPath,
+                countTokensPath: configuration.countTokensPath,
+                responsesURL: configuration.responsesURL,
+                executorModel: configuration.executorModel,
+                advisorModel: configuration.advisorModel,
+                gatewayAuthToken: makeGatewayToken(),
+                gatewayAuthHeader: configuration.gatewayAuthHeader,
+                subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
+                configurationPath: configuration.configurationPath,
+                configurationWarning: configuration.configurationWarning
+            )
+        )
+    }
+
     private func resolveConfiguration(
         stored: StoredConfiguration,
         storageURL: URL,

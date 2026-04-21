@@ -49,4 +49,42 @@ struct RouterConfigurationStoreTests {
         #expect(configuration.subscriptionAuthFilePath.hasSuffix("/auth.json"))
         #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_AUTH_TOKEN=env-token"))
     }
+
+    @Test
+    func savePersistsUpdatedConfigurationValues() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let configPath = tempRoot.appendingPathComponent("config.json").path
+        let store = RouterConfigurationStore(
+            environment: ["CC_ROUTER_CONFIG_PATH": configPath],
+            fileManager: .default,
+            homeDirectoryURL: tempRoot
+        )
+
+        let initial = store.loadOrCreate()
+        let updated = RouterConfiguration(
+            host: "127.0.0.9",
+            port: 4988,
+            healthPath: initial.healthPath,
+            messagesPath: initial.messagesPath,
+            countTokensPath: initial.countTokensPath,
+            responsesURL: "https://chatgpt.com/backend-api/codex/responses",
+            executorModel: "gpt-5.5",
+            advisorModel: "gpt-5.5",
+            gatewayAuthToken: initial.gatewayAuthToken,
+            gatewayAuthHeader: initial.gatewayAuthHeader,
+            subscriptionAuthFilePath: tempRoot.appendingPathComponent("auth-2.json").path,
+            configurationPath: initial.configurationPath,
+            configurationWarning: initial.configurationWarning
+        )
+
+        let saved = store.save(configuration: updated)
+
+        #expect(saved.host == "127.0.0.9")
+        #expect(saved.port == 4988)
+        #expect(saved.executorModel == "gpt-5.5")
+        #expect(saved.advisorModel == "gpt-5.5")
+        #expect(saved.subscriptionAuthFilePath.hasSuffix("/auth-2.json"))
+    }
 }

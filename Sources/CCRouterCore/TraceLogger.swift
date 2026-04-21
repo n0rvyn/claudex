@@ -4,6 +4,7 @@ public actor TraceLogger {
     public static let shared = TraceLogger()
 
     private let fileURL: URL
+    private let timestampKey = "logged_at_unix_ms"
 
     public init(fileURL: URL = URL(fileURLWithPath: "/tmp/modelbridge-trace.jsonl")) {
         self.fileURL = fileURL
@@ -16,7 +17,11 @@ public actor TraceLogger {
 
     public func log(_ payload: JSONObject) {
         let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(payload) else { return }
+        var enriched = payload
+        if enriched.values[timestampKey] == nil {
+            enriched[timestampKey] = .number(Date().timeIntervalSince1970 * 1000)
+        }
+        guard let data = try? encoder.encode(enriched) else { return }
         guard let line = String(data: data, encoding: .utf8) else { return }
         let output = line + "\n"
 
@@ -48,6 +53,13 @@ public actor TraceLogger {
         var functionCallNames: [String] = []
         var connectorNames: [String] = []
         var rejectedPaths: [String] = []
+        var requestTimestamps: [Int] = []
+        var latencies: [Int] = []
+        var recentErrorReasons: [String] = []
+        var successCount = 0
+        var failureCount = 0
+        var lastRequestOutcome: String?
+        var lastLatencyMilliseconds: Int?
 
         for line in lines {
             guard let json = line.data(using: .utf8),
@@ -59,8 +71,39 @@ public actor TraceLogger {
                 stageCounts[stage, default: 0] += 1
             }
 
+            let timestamp = object.values[timestampKey]?.intValue
+
+            if object.string("stage") == "anthropic_in", let timestamp {
+                requestTimestamps.append(timestamp)
+            }
+
             if let path = object.string("path"), object.string("stage") == "local_auth_reject" {
                 rejectedPaths.append(path)
+                failureCount += 1
+                lastRequestOutcome = "auth_rejected"
+                recentErrorReasons.append("Local auth rejected: \(path)")
+            }
+
+            if object.string("stage") == "anthropic_out" {
+                let statusCode = object.values["status_code"]?.intValue ?? 0
+                let outcome = object.string("result")
+                lastRequestOutcome = outcome
+                if let duration = object.values["duration_ms"]?.intValue {
+                    latencies.append(duration)
+                    lastLatencyMilliseconds = duration
+                }
+                if statusCode >= 400 {
+                    failureCount += 1
+                    if let message = object.string("error_message") {
+                        recentErrorReasons.append(message)
+                    } else if let errorType = object.string("error_type") {
+                        recentErrorReasons.append(errorType)
+                    } else if let outcome {
+                        recentErrorReasons.append(outcome)
+                    }
+                } else {
+                    successCount += 1
+                }
             }
 
             if let calls = object.array("function_calls") {
@@ -84,11 +127,22 @@ public actor TraceLogger {
             }
         }
 
+        let requestsPerMinute = computeRequestsPerMinute(from: requestTimestamps)
+
         return TraceDiagnostics(
             recentStageCounts: stageCounts,
             recentFunctionCallNames: uniquePreservingOrder(functionCallNames),
             recentConnectorNames: uniquePreservingOrder(connectorNames),
-            recentRejectedPaths: uniquePreservingOrder(rejectedPaths)
+            recentRejectedPaths: uniquePreservingOrder(rejectedPaths),
+            recentRequestCount: requestTimestamps.count,
+            recentSuccessCount: successCount,
+            recentFailureCount: failureCount,
+            requestsPerMinute: requestsPerMinute,
+            lastRequestOutcome: lastRequestOutcome,
+            lastLatencyMilliseconds: lastLatencyMilliseconds,
+            p50LatencyMilliseconds: percentile(latencies, percentile: 0.5),
+            p95LatencyMilliseconds: percentile(latencies, percentile: 0.95),
+            recentErrorReasons: uniquePreservingOrder(recentErrorReasons)
         )
     }
 
@@ -100,5 +154,19 @@ public actor TraceLogger {
             ordered.append(value)
         }
         return ordered
+    }
+
+    private func computeRequestsPerMinute(from timestamps: [Int]) -> Double {
+        guard let latestTimestamp = timestamps.max() else { return 0 }
+        let fiveMinutesInMilliseconds = 5 * 60 * 1000
+        let recentCount = timestamps.filter { latestTimestamp - $0 <= fiveMinutesInMilliseconds }.count
+        return Double(recentCount) / 5.0
+    }
+
+    private func percentile(_ values: [Int], percentile: Double) -> Int? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let index = Int((Double(sorted.count - 1) * percentile).rounded())
+        return sorted[max(0, min(index, sorted.count - 1))]
     }
 }
