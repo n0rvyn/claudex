@@ -29,6 +29,7 @@ The current verified path is:
 
 - `ModelBridge/`: Xcode macOS app target
 - `Sources/CCRouterCore/`: gateway, auth, trace, and protocol bridge code
+- `Vendor/zstd/`: vendored zstd static archive used to avoid external Homebrew dylib runtime linkage
 - `Sources/CCRouterDaemon/`: local daemon entry point
 - `Sources/CCRouterApp/`: menu bar runtime used by the Swift package build
 - `Tests/CCRouterCoreTests/`: Swift Testing coverage for config, auth, and trace diagnostics
@@ -109,6 +110,14 @@ Useful local overrides:
 - `CC_ROUTER_SUBSCRIPTION_AUTH_FILE`
 - `CC_ROUTER_EXECUTOR_MODEL`
 - `CC_ROUTER_ADVISOR_MODEL`
+
+## Runtime Linking
+
+ModelBridge does not rely on `/usr/local/opt/zstd/lib/libzstd.1.dylib` at launch time.
+
+- The repository vendors `libzstd.a` under `Vendor/zstd/lib/`
+- The `CZstd` target exposes the vendored headers from `Sources/CZstd/include/`
+- The packaged app and the Xcode Debug app are both verified to launch without a Homebrew zstd dylib dependency
 
 ## Current Verified State
 

@@ -2,6 +2,8 @@
 
 import PackageDescription
 
+let vendoredZstdArchive = "Vendor/zstd/lib/libzstd.a"
+
 let package = Package(
     name: "ModelBridge",
     platforms: [
@@ -22,16 +24,17 @@ let package = Package(
         ),
     ],
     targets: [
-        .systemLibrary(
+        .target(
             name: "CZstd",
-            pkgConfig: "libzstd",
-            providers: [
-                .brew(["zstd"]),
-            ]
+            path: "Sources/CZstd",
+            publicHeadersPath: "include"
         ),
         .target(
             name: "CCRouterCore",
-            dependencies: ["CZstd"]
+            dependencies: ["CZstd"],
+            linkerSettings: [
+                .unsafeFlags([vendoredZstdArchive]),
+            ]
         ),
         .executableTarget(
             name: "CCRouterDaemon",

@@ -10,3 +10,4 @@ DerivedData/
 /tmp-edit-check.txt
 __pycache__/
 *.pyc
+*.profraw
