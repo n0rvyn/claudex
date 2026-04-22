@@ -23,7 +23,7 @@ The current verified path is:
 - `ResponsesClient` forwards the translated execution path to `chatgpt.com/backend-api/codex/responses`
 - `SubscriptionSession` reads the local ChatGPT/Codex login material from `~/.codex/auth.json`
 - `TraceLogger` records runtime traces to `/tmp/modelbridge-trace.jsonl`
-- The menu bar app surfaces daemon state, doctor information, connector diagnostics, and the exact Claude env snippet
+- The Xcode app shell surfaces daemon state, dashboard metrics, connector diagnostics, and the exact Claude env snippet
 
 ## Start Here
 
@@ -34,11 +34,11 @@ If a new Codex or Claude session needs immediate context, start with:
 
 ## Repository Layout
 
-- `ModelBridge/`: Xcode macOS app target
+- `ModelBridge/`: active Xcode macOS app target and shipped UI shell
 - `Sources/CCRouterCore/`: gateway, auth, trace, and protocol bridge code
 - `Vendor/zstd/`: vendored zstd static archive used to avoid external Homebrew dylib runtime linkage
 - `Sources/CCRouterDaemon/`: local daemon entry point
-- `Sources/CCRouterApp/`: menu bar runtime used by the Swift package build
+- `Sources/CCRouterApp/`: legacy SwiftPM utility shell retained for package-local development; not the shipped app path
 - `Tests/CCRouterCoreTests/`: Swift Testing coverage for config, auth, and trace diagnostics
 - `scripts/`: bundle, smoke, signing, and notarization scripts
 - `docs/`: validated research, execution notes, and productization plans
@@ -133,6 +133,8 @@ ModelBridge does not rely on `/usr/local/opt/zstd/lib/libzstd.1.dylib` at launch
 - `scripts/build_app_bundle.sh` builds `dist/ModelBridge.app`
 - `scripts/smoke_local_gateway.sh` passes against the real local daemon
 - The local bundle is currently ad hoc signed for local use
+- The active Xcode app exposes a real-time dashboard plus a tabbed Settings window with `General`, `Gateway`, `Claude Code`, `Upstream`, and `Diagnostics`
+- Settings can persist gateway configuration changes and regenerate the local ingress token
 
 ## Distribution Notes
 

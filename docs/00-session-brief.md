@@ -50,7 +50,8 @@ What is already working:
 - local gateway auth is enforced through `x-api-key`
 - ChatGPT/Codex login state is read from `~/.codex/auth.json`
 - the Xcode app now has a redesigned menu bar dashboard with hero state, metric cards, runtime activity cards, and a live trace feed
-- the Settings window is now a single-window, multi-tab control center with `Overview`, `Gateway`, `Claude Code`, `Upstream`, `Diagnostics`, and `Advanced`
+- the Settings window is now a single-window, multi-tab control center with `General`, `Gateway`, `Claude Code`, `Upstream`, and `Diagnostics`
+- the app can now persist gateway host/port/model/auth-path changes and regenerate the local ingress token
 - `Claude Code CLI` has already completed real text, tool, and advisor paths through the local daemon
 - `scripts/smoke_local_gateway.sh` is the current repeatable runtime check
 - `dist/ModelBridge.app` builds locally
@@ -77,7 +78,7 @@ Current UI status:
 
 - Xcode build for the redesigned app passes
 - launching the built app succeeds and recent logs show normal AppKit window activity instead of dyld startup failure
-- `launch at login` remains packaged-app-only; debug builds return `ServiceManagement` status noise if older app processes are still running
+- `launch at login` remains packaged-app-only for final acceptance; earlier debug `ServiceManagement` noise was tied to stale older processes and did not reappear in the latest short-window relaunch check
 - the current UI redesign is implemented on the Xcode app path under `ModelBridge/`, not yet duplicated into the separate SwiftPM utility target under `Sources/CCRouterApp/`
 
 Current state is not yet public-distribution complete:

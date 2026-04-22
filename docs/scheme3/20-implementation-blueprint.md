@@ -12,9 +12,9 @@ Date: 2026-04-21
 
 - Claude 入口是 Anthropic Messages
 - 主推理面是 `chatgpt.com/backend-api/codex/responses`
-- 辅助产品面是 `/backend-api/...`
+- 研究期已观测到辅助产品面 `/backend-api/...`
 - `advisor` 不能 raw passthrough，只能 bridge
-- GitHub、Gmail、Notion 三个 app 家族当前都证明 sidecar 不是可选件
+- GitHub、Gmail、Notion 三个 app 家族的 app 动作样本都证明过 sidecar 依赖；但当前本地 runtime 还没有把本地 sidecar 代理纳入正式主链路
 
 ## 2. 最终产品形态
 
@@ -55,7 +55,6 @@ Date: 2026-04-21
   - `POST /v1/messages/count_tokens`
 - 维护 Claude 会话与上游 turn 映射
 - 承担 Anthropic -> `/responses` 的协议转换
-- 承担 `/backend-api/...` 的 sidecar 代理
 - 输出结构化日志和 doctor 数据
 
 ### 3.3 Subscription Session Layer
@@ -94,9 +93,9 @@ Date: 2026-04-21
 
 职责：
 
-- 代理当前已观测到的 `/backend-api/...` 请求
-- 保障 GitHub、Gmail、Notion 当前业务动作不因 sidecar 缺失而失败
-- 记录 sidecar 故障并与主推理日志关联
+- 保留研究期 `/backend-api/...` 依赖结论
+- 作为未来扩展位承接 app 动作代理
+- 只有当新的本地运行证据证明 Claude 实际路径要求它时，才进入正式 runtime 主链路
 
 ## 4. 主流程
 
@@ -137,12 +136,12 @@ Date: 2026-04-21
 
 1. 主推理仍走 `/responses`
 2. 当前本地 Swift runtime 先以 Anthropic `/v1/messages -> /responses` 桥接承接 Claude CLI 的默认工具清单
-3. 若未来某类 Claude 路径证明还需要本地产品面转发，再补 `backend-sidecar`
-4. 研究期 sidecar 结论继续保留，但不再直接等同于“当前本地 runtime 必须先写本地 `/backend-api/...` 模块”
+3. 研究期 sidecar 结论继续保留，但不再直接等同于“当前本地 runtime 必须先写本地 `/backend-api/...` 模块”
+4. 若未来某类 Claude 路径证明还需要本地产品面转发，再补 `backend-sidecar`
 
 ## 5. 正式模块边界
 
-正式代码按这 8 个模块设计；当前本地 runtime 已正式落地前 7 项中的核心主链路，`backend-sidecar` 保留为扩展位：
+正式代码按这 8 个模块设计；当前本地 runtime 已正式落地前 7 项中的核心主链路，`backend-sidecar` 仍保留为 deferred extension：
 
 1. `anthropic-edge`
 2. `count-tokens`
@@ -162,7 +161,7 @@ Date: 2026-04-21
 
 - 不把 `app-server` 混进正式主链路
 - 不接 public `api.openai.com/v1/responses`
-- 不把 sidecar 当成可选优化
+- 不把研究期 sidecar 观测结果误写成“当前本地 runtime 已实现 sidecar”
 - 不把“当前 HTTP-only 已测可行”外推成“永远不需要 websocket”
 
 ## 7. 进入编码的 gate
@@ -197,7 +196,9 @@ Date: 2026-04-21
 - `Sources/CCRouterCore/RouterConfigurationStore.swift`
 - `Sources/CCRouterCore/LocalGatewayAuthorization.swift`
 - `Sources/CCRouterCore/DoctorSnapshot.swift`
-- `Sources/CCRouterApp/CCRouterApp.swift`
+- `ModelBridge/ModelBridgeApp.swift`
+- `ModelBridge/ContentView.swift`
+- `ModelBridge/SettingsView.swift`
 - `Sources/CCRouterDaemon/main.swift`
 - `Tests/CCRouterCoreTests/RouterConfigurationStoreTests.swift`
 - `Tests/CCRouterCoreTests/LocalGatewayAuthorizationTests.swift`
@@ -206,6 +207,7 @@ Date: 2026-04-21
 
 - ChatGPT 登录态读取
 - 持久化本地 gateway 配置
+- Settings 驱动的配置写回与 gateway token 轮换
 - `x-api-key` ingress 校验
 - zstd 压缩
 - Anthropic 请求解析
@@ -213,10 +215,10 @@ Date: 2026-04-21
 - function tool 两段回合桥接
 - advisor synthetic bridge
 - 本地 doctor 与 trace 日志
+- dashboard metrics：请求数、成功/失败数、requests/min、p50/p95 latency、最近错误原因
 - Swift Testing 对配置与 ingress auth 的覆盖
 - 当前默认完整工具清单文本路径与代表性 Notion auth 路径的真实运行证据
 
 当前还没有正式编码的仍是：
 
-- 更完整的 macOS doctor 页面与日志查看 UI
 - 如果未来某类 Claude CLI 路径需要它，再补本地 `/backend-api/...` sidecar 代理

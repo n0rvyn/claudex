@@ -41,12 +41,11 @@ Sections:
 
 Settings is a single-window, tabbed control surface. Tabs:
 
-1. `Overview`
+1. `General`
 2. `Gateway`
 3. `Claude Code`
 4. `Upstream`
 5. `Diagnostics`
-6. `Advanced`
 
 ## User Journeys
 
@@ -71,7 +70,7 @@ Settings is a single-window, tabbed control surface. Tabs:
 |----|-----------|-------------|
 | UX-001 | The menu bar opens into a dashboard, not a plain menu list. | Check `ModelBridge/ContentView.swift` for card-based sections and a scrollable dashboard layout. |
 | UX-002 | The first visible region communicates current health before detailed logs. | Check for a hero card above metric and feed sections. |
-| UX-003 | Settings is a tabbed single window with operational tabs, not a long doctor page. | Check `DoctorSettingsView` for `TabView` and the six tab labels. |
+| UX-003 | Settings is a tabbed single window with operational tabs, not a long doctor page. | Check `DoctorSettingsView` for `TabView` and the five tab labels. |
 | UX-004 | The Claude Code setup path is copyable without manual editing. | Check for a dedicated `Claude Code` tab and copy actions using `envSnippet`. |
 | UX-005 | Diagnostics expose recent request outcome, connector activity, and trace location in one place. | Check the diagnostics tab content for trace, connector, error, and recent-event sections. |
 
@@ -95,7 +94,7 @@ Settings is a single-window, tabbed control surface. Tabs:
   - p50/p95 latency
   - last request outcome
   - recent error reasons
-- `RouterConfigurationStore` gains write APIs for Settings-driven changes.
+- `RouterConfigurationStore` gains write APIs for Settings-driven changes and gateway-token regeneration.
 - `ContentView` becomes the dashboard composition root.
 - `DoctorSettingsView` becomes the tabbed settings composition root.
 
