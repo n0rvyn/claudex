@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Phase 7 acceptance mode: CC_ROUTER_TRACE_PATH isolates trace; do not rely on
+# production ~/Library/Application Support/ModelBridge/trace.jsonl. See
+# docs/11-crystals/2026-04-24-phase-7-e2e-acceptance-crystal.md D-003.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,12 +17,17 @@ PORT="${CC_ROUTER_PORT:-4417}"
 HEALTH_URL="http://$HOST:$PORT/health"
 CONFIG_PATH="${CC_ROUTER_CONFIG_PATH:-/tmp/modelbridge-smoke-config.json}"
 GATEWAY_TOKEN="${CC_ROUTER_GATEWAY_TOKEN:-modelbridge-smoke-token}"
+SMOKE_OUTDIR="${SMOKE_OUTDIR:-$(mktemp -d -t modelbridge-smoke.XXXXXX)}"
+TRACE_PATH="$SMOKE_OUTDIR/trace.jsonl"
+HEALTH_FILE="$SMOKE_OUTDIR/health.json"
+DAEMON_LOG="$SMOKE_OUTDIR/daemon.log"
+RESULT_FILE="$SMOKE_OUTDIR/result.txt"
 
-if [[ ! -x "$DAEMON_BIN" ]]; then
-  swift build --disable-sandbox --product modelbridge-daemon
-fi
+echo "smoke outdir: $SMOKE_OUTDIR"
 
-if curl -sS "$HEALTH_URL" >/tmp/modelbridge-smoke-health.json 2>/dev/null; then
+swift build --disable-sandbox --product modelbridge-daemon
+
+if curl -sS "$HEALTH_URL" > "$HEALTH_FILE" 2>/dev/null; then
   echo "Smoke port $PORT is already in use; set CC_ROUTER_PORT to a free port and rerun."
   exit 1
 fi
@@ -28,7 +37,8 @@ env \
   CC_ROUTER_PORT="$PORT" \
   CC_ROUTER_CONFIG_PATH="$CONFIG_PATH" \
   CC_ROUTER_GATEWAY_TOKEN="$GATEWAY_TOKEN" \
-  "$DAEMON_BIN" >/tmp/modelbridge-smoke-daemon.log 2>&1 &
+  CC_ROUTER_TRACE_PATH="$TRACE_PATH" \
+  "$DAEMON_BIN" > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
 cleanup() {
@@ -38,26 +48,64 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 for _ in $(seq 1 30); do
-  if curl -sS "$HEALTH_URL" >/tmp/modelbridge-smoke-health.json 2>/dev/null; then
+  if curl -sS "$HEALTH_URL" > "$HEALTH_FILE" 2>/dev/null; then
     break
   fi
   sleep 1
 done
 
-if ! test -f /tmp/modelbridge-smoke-health.json; then
+if ! curl -sS "$HEALTH_URL" > "$HEALTH_FILE" 2>/dev/null; then
   echo "Health check never succeeded"
+  cat "$DAEMON_LOG"
   exit 1
 fi
 
 env \
   ANTHROPIC_BASE_URL="http://$HOST:$PORT" \
   ANTHROPIC_AUTH_TOKEN="$GATEWAY_TOKEN" \
-  claude --bare -p --output-format json 'Reply exactly SMOKEOK.' >/tmp/modelbridge-smoke-result.json
+  expect scripts/run_claude_tui_smoke.expect \
+    'Return exactly the seven-character token formed by SMOKE followed by OK.' \
+    "$RESULT_FILE" \
+    "$TRACE_PATH" \
+    'SMOKEOK'
 
-if ! rg -q '"result":"SMOKEOK"' /tmp/modelbridge-smoke-result.json; then
+if ! rg -q 'SMOKEOK' "$RESULT_FILE"; then
   echo "Smoke command did not return SMOKEOK"
-  cat /tmp/modelbridge-smoke-result.json
+  cat "$RESULT_FILE"
   exit 1
 fi
 
-echo "Smoke validation passed"
+# Phase 7 new: trace field assertions
+if [[ ! -f "$TRACE_PATH" ]]; then
+  echo "Trace file not created at $TRACE_PATH"
+  exit 1
+fi
+
+# (a) anthropic_in stage must have claude_model
+if ! jq -e 'select(.stage == "anthropic_in") | .claude_model' "$TRACE_PATH" >/dev/null; then
+  echo "Trace missing anthropic_in.claude_model"
+  cat "$TRACE_PATH"
+  exit 1
+fi
+
+# upstream_model in responses_out stage
+if ! jq -e 'select(.stage == "responses_out_initial" or .stage == "responses_out") | .upstream_model' "$TRACE_PATH" >/dev/null; then
+  echo "Trace missing responses_out upstream_model"
+  cat "$TRACE_PATH"
+  exit 1
+fi
+
+# (b) prompt_cache_key must be present
+if ! jq -e 'select(.prompt_cache_key != null) | .prompt_cache_key' "$TRACE_PATH" >/dev/null; then
+  echo "Trace missing prompt_cache_key"
+  exit 1
+fi
+
+# (c) real streaming delta exists
+if ! jq -e 'select(.stage == "responses_in_event")' "$TRACE_PATH" >/dev/null; then
+  echo "Trace missing per-event responses_in_event stage (real streaming not wired)"
+  exit 1
+fi
+
+echo "Smoke validation passed with trace assertions"
+echo "Trace retained at: $TRACE_PATH"

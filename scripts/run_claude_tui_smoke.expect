@@ -1,0 +1,113 @@
+#!/usr/bin/env expect
+
+if {$argc < 3 || $argc > 4} {
+    puts stderr "usage: run_claude_tui_smoke.expect <prompt> <output-file> <trace-path> <optional-expected-output-token>"
+    exit 64
+}
+
+set prompt [lindex $argv 0]
+set outputFile [lindex $argv 1]
+set tracePath [lindex $argv 2]
+set expectedToken ""
+if {$argc == 4} {
+    set expectedToken [lindex $argv 3]
+}
+
+set timeoutSeconds 180
+if {[info exists env(CLAUDE_TUI_TIMEOUT)] && $env(CLAUDE_TUI_TIMEOUT) ne ""} {
+    set timeoutSeconds $env(CLAUDE_TUI_TIMEOUT)
+}
+
+set modelFilter ""
+if {[info exists env(ANTHROPIC_MODEL)] && $env(ANTHROPIC_MODEL) ne ""} {
+    set modelFilter $env(ANTHROPIC_MODEL)
+}
+
+match_max 200000
+log_user 0
+
+spawn -noecho /usr/bin/script -F -q $outputFile claude
+
+proc wait_for_startup {} {
+    expect {
+        -re "Claude Code" { return }
+        -re "❯" { return }
+        timeout { return }
+        eof {
+            puts stderr "Claude TUI exited before startup"
+            exit 65
+        }
+    }
+}
+
+wait_for_startup
+after 3000
+send -- "$prompt"
+after 200
+send -- "\r"
+
+proc file_contains {path needle} {
+    if {$needle eq ""} {
+        return 1
+    }
+    if {![file exists $path]} {
+        return 0
+    }
+    set fh [open $path r]
+    set body [read $fh]
+    close $fh
+    return [expr {[string first $needle $body] >= 0}]
+}
+
+proc trace_has_success {path model} {
+    if {![file exists $path]} {
+        return 0
+    }
+    if {$model eq ""} {
+        set filter {select(.stage == "anthropic_out" and .result == "success")}
+    } else {
+        set escapedModel [string map {"\\" "\\\\" "\"" "\\\""} $model]
+        set filter "select(.stage == \"anthropic_out\" and .result == \"success\" and .claude_model == \"$escapedModel\")"
+    }
+    return [expr {[catch {exec jq -e $filter $path} _] == 0}]
+}
+
+set deadline [expr {[clock seconds] + $timeoutSeconds}]
+set done 0
+set childExited 0
+
+while {[clock seconds] < $deadline} {
+    set timeout 1
+    expect {
+        eof {
+            set childExited 1
+        }
+        timeout {}
+    }
+
+    if {[trace_has_success $tracePath $modelFilter] && [file_contains $outputFile $expectedToken]} {
+        set done 1
+        break
+    }
+
+    if {$childExited} {
+        break
+    }
+}
+
+if {!$done} {
+    puts stderr "Timed out waiting for Claude TUI smoke completion"
+    catch {send -- "\003"}
+    exit 124
+}
+
+send -- "/exit\r"
+set timeout 15
+expect {
+    eof {}
+    timeout {
+        catch {send -- "\003"}
+    }
+}
+
+exit 0
