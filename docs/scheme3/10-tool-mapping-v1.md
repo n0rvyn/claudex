@@ -17,8 +17,8 @@ Date: 2026-04-20
 
 当前使用了三条真实样本：
 
-1. `claude --bare -p` 指向本地抓包器
-2. `claude -p` 指向本地抓包器
+1. `claude` 指向本地抓包器
+2. `claude` 指向本地抓包器
 3. `codex exec --json` 的真实 `/responses` zstd 请求体
 
 当前范围只覆盖：
@@ -29,7 +29,7 @@ Date: 2026-04-20
 
 ## 3. 已验证工具清单
 
-### 3.1 Claude `--bare -p`
+### 3.1 Claude `interactive claude`
 
 当前已验证：
 
@@ -45,7 +45,7 @@ Date: 2026-04-20
 - `Read`
 - `advisor`
 
-### 3.2 Claude `-p`
+### 3.2 Claude 默认交互式工具清单
 
 当前已验证：
 
@@ -152,7 +152,7 @@ Claude 当前已验证的特种工具：
   - 响应里会出现 `advisor_tool_result`
   - 多轮必须把 `advisor_tool_result` 一起带回
 - 本机 `claude 2.1.114` 运行态也已验证：
-  - `claude --bare -p` 接受 `server_tool_use + advisor_tool_result`
+  - `claude` 接受 `server_tool_use + advisor_tool_result`
   - 续轮请求会把这两个 block 原样带回
 - `/responses` 的 `custom`、`web_search`、`namespace` 在当前 Claude 样本里也没有同形态对应物
 
@@ -170,7 +170,7 @@ Claude 当前已验证的特种工具：
 
 当前已验证：
 
-- 默认 `claude -p` 的工具名集合
+- 默认 `claude` 的工具名集合
 - 和当前 `/responses` 样本的工具名集合
 - 交集是空集
 
@@ -214,8 +214,8 @@ Claude 当前已验证的特种工具：
 
 当前结果：
 
-- 使用 `claude --bare -p` 的 `3` 个 function tools 时，得到 `turn.completed`
-- 使用默认 `claude -p` 的 `55` 个 function tools 时，仍得到 `turn.completed`
+- 使用 `claude` 的 `3` 个 function tools 时，得到 `turn.completed`
+- 使用默认 `claude` 的 `55` 个 function tools 时，仍得到 `turn.completed`
 
 当前含义：
 
@@ -226,7 +226,7 @@ Claude 当前已验证的特种工具：
 
 当前范围：
 
-- `claude --bare -p` 抓到的 `3` 个 function tools
+- `claude` 抓到的 `3` 个 function tools
 - 本地代理把它们改写成 `/responses` function tools
 - 第一段 `/responses` 强制 `tool_choice = {type:"function", name:"Bash"}`
 - 第二段 `/responses` 送回：
@@ -258,13 +258,13 @@ Claude 当前已验证的特种工具：
   - 改写后的 Claude function tool 名称会原样出现在上游 `function_call.name`
   - 上游接受 `function_call_output`
   - 第二段 `input` 当前至少可由 `reasoning + function_call + function_call_output` 组成
-- 当前证据不支持把这条结论外推到默认 `claude -p` 的全部工具
+- 当前证据不支持把这条结论外推到默认 `claude` 的全部工具
 
-### 7.3 已验证默认 `claude -p` 的 `55` 个 function tools 下，强制 `Bash` 也能闭环
+### 7.3 已验证默认 `claude` 的 `55` 个 function tools 下，强制 `Bash` 也能闭环
 
 当前范围：
 
-- 默认 `claude -p` 抓到的 `55` 个 function tools
+- 默认 `claude` 抓到的 `55` 个 function tools
 - `advisor_20260301` 不在本次转换里
 - 第一段 `/responses` 强制 `tool_choice = {type:"function", name:"Bash"}`
 - 第二段继续送回：
@@ -297,7 +297,7 @@ Claude 当前已验证的特种工具：
 
 当前范围：
 
-- 默认 `claude -p` 抓到的 `55` 个 function tools
+- 默认 `claude` 抓到的 `55` 个 function tools
 - `advisor_20260301` 不在本次转换里
 - 第一段强制单个函数工具
 - 第二段继续送回：
@@ -377,7 +377,7 @@ Claude 当前已验证的特种工具：
 
 当前范围：
 
-- 默认 `claude -p` 抓到的真实工具清单
+- 默认 `claude` 抓到的真实工具清单
 - 第一段强制：
   - `mcp__plugin_Notion_notion__authenticate`
 - 第二段继续送回：
@@ -409,7 +409,7 @@ Claude 当前已验证的特种工具：
 
 当前范围：
 
-- 默认 `claude -p` 抓到的 `56` 个工具
+- 默认 `claude` 抓到的 `56` 个工具
 - `55` 个 function tools 先按既有规则改写成 `/responses` function tools
 - `advisor_20260301` 保持 raw 形状：
   - `{"type":"advisor_20260301","name":"advisor","model":"claude-opus-4-7"}`
@@ -451,7 +451,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
   - `server_tool_use`
   - `advisor_tool_result`
   - `text`
-- `claude --bare -p` 正常完成
+- `claude` 正常完成
 - 用相同 `session_id` 续轮后，Claude 会在 assistant content 中原样带回：
   - `server_tool_use`
   - `advisor_tool_result`
@@ -502,5 +502,5 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - 不能说 raw `advisor_20260301` 可以直接透传到 `/responses`
 - 不能说 `Bash -> exec_command`、`Edit -> apply_patch`、`Agent -> spawn_agent` 就是最终正式映射
 - 不能说当前 `/responses` 样本里的 16 个工具就是方案三必须采用的工具集合
-- 不能说默认 `claude -p` 的全部 function tools 都已经跑通
+- 不能说默认 `claude` 的全部 function tools 都已经跑通
 - 不能说 advisor bridge 原型已经等于正式实现

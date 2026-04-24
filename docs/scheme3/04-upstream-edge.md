@@ -465,8 +465,8 @@ Date: 2026-04-20
 
 当前范围：
 
-- `claude --bare -p` 抓到的 `3` 个 function tools
-- 默认 `claude -p` 抓到的 `55` 个 function tools
+- `claude` 抓到的 `3` 个 function tools
+- 默认 `claude` 抓到的 `55` 个 function tools
 - 本地代理把它们改写成 `/responses` function tools
 - 第一段强制 `Bash`
 - 第二段把 `function_call_output` 送回真实远端

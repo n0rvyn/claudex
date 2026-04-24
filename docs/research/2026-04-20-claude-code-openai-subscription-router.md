@@ -27,7 +27,7 @@ Searches were run on `2026-04-20`.
 
 | Claim | Evidence A | Evidence B | Result |
 | --- | --- | --- | --- |
-| Claude Code can target a custom gateway, but the gateway must speak Claude-compatible API shapes | Anthropic `LLM gateway` docs require `/v1/messages` and `/v1/messages/count_tokens`, and require forwarding `anthropic-beta` and `anthropic-version`: <https://code.claude.com/docs/en/llm-gateway> | Local runtime probe captured a real `claude --bare -p` request to `POST /v1/messages?beta=true` with `anthropic-beta`, `anthropic-version`, and `X-Claude-Code-Session-Id` headers | Confirmed |
+| Claude Code can target a custom gateway, but the gateway must speak Claude-compatible API shapes | Anthropic `LLM gateway` docs require `/v1/messages` and `/v1/messages/count_tokens`, and require forwarding `anthropic-beta` and `anthropic-version`: <https://code.claude.com/docs/en/llm-gateway> | Local runtime probe captured a real `claude` request to `POST /v1/messages?beta=true` with `anthropic-beta`, `anthropic-version`, and `X-Claude-Code-Session-Id` headers | Confirmed |
 | Claude Code is not satisfied by a generic OpenAI endpoint; it expects Anthropic Messages semantics | Anthropic `LLM gateway` docs define the accepted formats and the required Anthropic headers: <https://code.claude.com/docs/en/llm-gateway> | The local runtime probe showed Claude Code sending an Anthropic-style request body with `model`, `messages`, `system`, `tools`, `thinking`, `context_management`, and `stream: true` to `/v1/messages?beta=true` | Confirmed |
 | Codex can authenticate with a ChatGPT subscription, not only an API key | OpenAI Codex CLI docs: “Authenticate with your ChatGPT account or an API key” and “ChatGPT Plus, Pro, Business, Edu, and Enterprise plans include Codex”: <https://developers.openai.com/codex/cli> | Local `codex login status` output: `Logged in using ChatGPT`; official `login.rs` also prints `Logged in using ChatGPT` for `AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens`: <https://github.com/openai/codex/blob/main/codex-rs/cli/src/login.rs> | Confirmed |
 | Codex has a dedicated ChatGPT backend surface under `/backend-api` | Official source `backend-client/src/client.rs` normalizes `https://chatgpt.com` and `https://chat.openai.com` to include `/backend-api`, then switches path style to `/wham/...`: <https://github.com/openai/codex/blob/main/codex-rs/backend-client/src/client.rs> | Local runtime probe with `chatgpt_base_url="http://127.0.0.1:8767/backend-api"` captured `GET /backend-api/plugins/list`, `GET /backend-api/plugins/featured`, and `POST /backend-api/codex/analytics-events/events` | Confirmed |
@@ -39,13 +39,13 @@ Searches were run on `2026-04-20`.
 | A raw ChatGPT-auth bearer plus `chatgpt-account-id` is not accepted by the public Responses API for writes | Local forwarding proxy to `https://api.openai.com/v1/responses` relayed the captured `/responses` request unchanged except for transport headers | The upstream JSON error body explicitly said `Missing scopes: api.responses.write` and `codex exec` terminated with `turn.failed` on `401 Unauthorized` | Confirmed for the current machine |
 | The real upstream success stream is a superset of the local minimal contract; it adds a reasoning item before the assistant message and includes extra sequencing fields | OpenAI streaming docs list `response.created`, `response.output_item.added`, `response.content_part.added`, `response.output_text.delta`, `response.output_item.done`, and `response.completed` event types: <https://platform.openai.com/docs/guides/streaming-responses>, <https://platform.openai.com/docs/api-reference/responses-streaming/response/output_text/delta?lang=javascript> | Real upstream capture from `https://chatgpt.com/backend-api/codex/responses` produced the sequence `response.created -> response.in_progress -> response.output_item.added(reasoning) -> response.output_item.done(reasoning) -> response.output_item.added(message) -> response.content_part.added -> response.output_text.delta -> response.output_text.done -> response.content_part.done -> response.output_item.done(message) -> response.completed`; sampled events included `sequence_number`, `logprobs`, `obfuscation`, and reasoning `encrypted_content` | Confirmed for the captured sample |
 | For the current `codex exec --json` single-turn text path, the real upstream sample can be reduced to the local minimal SSE contract and still complete successfully | Local replay experiments ran ten variants derived from the real upstream sample; `baseline`, `drop_sequence_number`, `drop_reasoning_item`, `drop_annotations`, `drop_annotations_logprobs`, `drop_obfuscation`, `drop_response_extras`, `drop_all_optional`, `drop_reasoning_and_optional`, and `probe_minimal` all ended with `turn.completed` | The final `probe_minimal` variant removed reasoning items, all observed `sequence_number`, `annotations`, `logprobs`, `obfuscation`, and extra response metadata, yet `codex exec` still returned `item.completed` and `turn.completed` | Confirmed for the current probed path |
-| Claude default mode and bare mode expose different tool inventories, and the current Claude/Codex tool names have no direct overlap | Local capture of `claude --bare -p` against a loopback `/v1/messages` server recorded 4 tools: `Bash`, `Edit`, `Read`, and `advisor`; local capture of `claude -p` recorded 56 tools with 55 `function` plus 1 `advisor_20260301` | Comparing the captured default Claude tool names with the current `/responses` tool names from the zstd request body produced an empty intersection; the current `/responses` sample has 16 tools with types `function`, `custom`, `web_search`, and `namespace` | Confirmed for the current machine and CLI path |
-| The current subscription-backed `/responses` endpoint accepts Claude-derived function tool declarations after envelope rewriting | A local forwarding proxy replaced the real `/responses` request's `tools` array with 3 converted function tools from the captured `claude --bare -p` request and `codex exec` still ended with `turn.completed` | The same proxy pattern replaced `tools` with 55 converted function tools from the captured default `claude -p` request; the persisted log `/tmp/codex-claude-tool-rewrite-full.log` ended with `item.completed` and `turn.completed` | Confirmed for the current text path |
+| Claude default mode and bare mode expose different tool inventories, and the current Claude/Codex tool names have no direct overlap | Local capture of `claude` against a loopback `/v1/messages` server recorded 4 tools: `Bash`, `Edit`, `Read`, and `advisor`; local capture of `claude` recorded 56 tools with 55 `function` plus 1 `advisor_20260301` | Comparing the captured default Claude tool names with the current `/responses` tool names from the zstd request body produced an empty intersection; the current `/responses` sample has 16 tools with types `function`, `custom`, `web_search`, and `namespace` | Confirmed for the current machine and CLI path |
+| The current subscription-backed `/responses` endpoint accepts Claude-derived function tool declarations after envelope rewriting | A local forwarding proxy replaced the real `/responses` request's `tools` array with 3 converted function tools from the captured `claude` request and `codex exec` still ended with `turn.completed` | The same proxy pattern replaced `tools` with 55 converted function tools from the captured default `claude` request; the persisted log `/tmp/codex-claude-tool-rewrite-full.log` ended with `item.completed` and `turn.completed` | Confirmed for the current text path |
 | The current subscription-backed `/responses` endpoint accepts a Claude-style function roundtrip using `function_call_output` | OpenAI function-calling docs say a tool result is sent back as an input item with `type: "function_call_output"`, `call_id`, and `output`, and show appending those results back into the next Responses call: <https://developers.openai.com/api/docs/guides/function-calling> | A local two-step proxy forced the converted `Bash` tool on the first `/responses` call, captured a real upstream `function_call` named `Bash`, then sent a second `/responses` call with `reasoning + function_call + function_call_output`; this completed once with the bare 3-tool set and once with the default 55-function-tool set, and both `codex exec` runs ended with `turn.completed` | Confirmed for the current function-tool roundtrip path |
 | The current subscription-backed `/responses` endpoint also accepts representative Claude function families beyond `Bash` and at least one high-risk concrete `mcp__...` instance | OpenAI function-calling docs define the same multi-turn contract for all function tools: return the tool result as `function_call_output` with the model-provided `call_id`: <https://developers.openai.com/api/docs/guides/function-calling> | Local two-step probes forced `WebSearch`, `Agent`, `Read`, `Edit`, `Write`, `TodoWrite`, `AskUserQuestion`, `mcp__claude_ai_Google_Drive__authenticate`, and `mcp__plugin_Notion_notion__authenticate` under the default Claude tool inventory; each run produced a real upstream `function_call`, accepted a second request containing `reasoning + function_call + function_call_output`, and ended with `codex exec` `turn.completed` | Confirmed for the current representative set and one concrete high-risk `mcp__...` instance; this is not proof that every individual tool instance or mcp schema works |
-| The current subscription-backed `/responses` endpoint rejects raw passthrough of Claude's `advisor_20260301` tool shape | Local Claude capture recorded the raw advisor object exactly as `{"type":"advisor_20260301","name":"advisor","model":"claude-opus-4-7"}` in the default `claude -p` request body | A local forwarding proxy appended that raw object to the rewritten `tools` array; the first upstream `https://chatgpt.com/backend-api/codex/responses` call returned `400 Bad Request` with body `{"detail":"Unsupported tool type: advisor_20260301"}`, and `codex exec` ended with `turn.failed` | Confirmed for the current raw-passthrough path; this does not rule out a separate adapter strategy |
-| Anthropic now publishes an official Advisor tool contract, and it defines advisor as a single-request server-side tool | Official `Advisor tool` docs specify the request shape `{"type":"advisor_20260301","name":"advisor","model":"..."}`, the response blocks `server_tool_use` and `advisor_tool_result`, and require carrying `advisor_tool_result` forward on later turns: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool> | Local `claude --bare -p` probe against a loopback Anthropic mock accepted `server_tool_use + advisor_tool_result`, and a follow-up `claude -r` request replayed both blocks verbatim in assistant history | Confirmed |
-| A local Anthropic-compatible gateway can preserve advisor semantics for Claude Code by returning `server_tool_use + advisor_tool_result` without any client-side tool roundtrip | Official Advisor docs say the advisor call stays inside one `/v1/messages` request and the client must carry `advisor_tool_result` forward on later turns: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool> | Local probe server on `127.0.0.1:8781` returned those blocks, `claude --bare -p` completed with `Advisor consulted. Final answer from the first turn.`, and the resumed request contained assistant content blocks `server_tool_use` and `advisor_tool_result` | Confirmed |
+| The current subscription-backed `/responses` endpoint rejects raw passthrough of Claude's `advisor_20260301` tool shape | Local Claude capture recorded the raw advisor object exactly as `{"type":"advisor_20260301","name":"advisor","model":"claude-opus-4-7"}` in the default `claude` request body | A local forwarding proxy appended that raw object to the rewritten `tools` array; the first upstream `https://chatgpt.com/backend-api/codex/responses` call returned `400 Bad Request` with body `{"detail":"Unsupported tool type: advisor_20260301"}`, and `codex exec` ended with `turn.failed` | Confirmed for the current raw-passthrough path; this does not rule out a separate adapter strategy |
+| Anthropic now publishes an official Advisor tool contract, and it defines advisor as a single-request server-side tool | Official `Advisor tool` docs specify the request shape `{"type":"advisor_20260301","name":"advisor","model":"..."}`, the response blocks `server_tool_use` and `advisor_tool_result`, and require carrying `advisor_tool_result` forward on later turns: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool> | Local `claude` probe against a loopback Anthropic mock accepted `server_tool_use + advisor_tool_result`, and a follow-up `claude -r` request replayed both blocks verbatim in assistant history | Confirmed |
+| A local Anthropic-compatible gateway can preserve advisor semantics for Claude Code by returning `server_tool_use + advisor_tool_result` without any client-side tool roundtrip | Official Advisor docs say the advisor call stays inside one `/v1/messages` request and the client must carry `advisor_tool_result` forward on later turns: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool> | Local probe server on `127.0.0.1:8781` returned those blocks, `claude` completed with `Advisor consulted. Final answer from the first turn.`, and the resumed request contained assistant content blocks `server_tool_use` and `advisor_tool_result` | Confirmed |
 | The subscription-backed `/responses` path can bridge advisor by translating it to a synthetic zero-arg function plus a local subcall | OpenAI function-calling docs define the `function_call_output` roundtrip shape: <https://developers.openai.com/api/docs/guides/function-calling> | Local bridge probe on `127.0.0.1:8782` forced a synthetic `advisor` function call, executed a second real `/responses` subcall to obtain advice text, then sent `function_call_output` back into the main turn; both `gpt-5.4 -> gpt-5.4` and `gpt-5.3-codex -> gpt-5.4` samples ended with `turn.completed` | Confirmed for the current bridge prototype |
 | The ChatGPT-subscription `/responses` endpoint accepts some model IDs and rejects others when called through Codex account auth | Official OpenAI model docs describe `gpt-5.4` as the flagship model and `gpt-5.3-codex` as an agentic coding model: <https://developers.openai.com/api/docs/models>, <https://developers.openai.com/api/docs/models/gpt-5.3-codex> | Local direct probes to `https://chatgpt.com/backend-api/codex/responses` with ChatGPT auth returned `200` for `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex`, and `400` with explicit unsupported-model errors for `gpt-5.2-codex` and `gpt-5.1-codex-max` | Confirmed for the current machine |
 | HTTP-only `/responses` currently covers non-interactive multi-turn text and resumed native tool paths | Official `codex exec resume` CLI exists and resumes a previous session by id: local `codex exec resume --help` | Local transparent proxy on `127.0.0.1:8784` returned `404` for every websocket `GET /responses` and transparently forwarded only HTTP `POST /responses`; both `Reply exactly FIRST. -> Reply exactly SECOND.` and `Reply exactly ALPHA. -> Read /etc/hosts and reply with only the first token.` sessions completed, and the resumed tool path showed a first HTTP response with `function_call(name=\"exec_command\")` followed by a second HTTP request carrying `function_call_output` | Confirmed for current non-interactive CLI paths |
@@ -62,8 +62,8 @@ Searches were run on `2026-04-20`.
 | The current non-interactive `features.apps=true` `codex exec/exec resume` text path also completes over HTTP-only after websocket `404` | Local forward proxy on `127.0.0.1:8823` forced websocket `GET /responses` to `404` and transparently forwarded HTTP `POST /responses`; first turn `Reply exactly APPSRESUME1.` ended with `item.completed` text `APPSRESUME1` and `turn.completed` | The resumed turn `Reply exactly APPSRESUME2.` against the same thread also ended with `item.completed` text `APPSRESUME2` and `turn.completed`; the paired log recorded `POST /responses = 2`, request 1 `input_len = 3`, request 2 `input_len = 6`, and both requests `tools_len = 21` with 6 `namespace` tools | Confirmed for the current non-interactive apps text path |
 | The current non-interactive `features.apps=true` `codex exec/exec resume` text path does not treat the observed sidecar calls as hard dependencies | Local blocker on `127.0.0.1:8825` forced `404` on `/backend-api/codex/analytics-events/events`, `/backend-api/connectors/directory/list?tier=categorized&external_logos=true`, `/backend-api/plugins/featured?platform=codex`, `/backend-api/plugins/list`, and `/backend-api/wham/apps`; first turn still ended with `APPSSIDE404A`, resumed turn still ended with `APPSSIDE404B`, and the paired `/responses` forwarder recorded two successful POSTs | Local blocker on `127.0.0.1:8827` forced the same sidecar paths to `500`; first turn still ended with `APPSSIDE500A`, resumed turn still ended with `APPSSIDE500B`, and both runs exposed only stderr from `rmcp::transport::worker ... data did not match any variant of untagged enum JsonRpcMessage ...` without blocking `turn.completed` | Confirmed for the current non-interactive apps text path |
 | The current interactive `features.apps=true` same-session second-turn text path has a different `/responses` error surface than the first-turn text path | Local `400` injection on the second `POST /responses` at `127.0.0.1:8860` produced terminal output `{"detail": "forced 400 from local /responses proxy"}` with `POST /responses = 2` | Local `500`, `malformed-sse`, and `truncated-sse` injections on the second `POST /responses` at `127.0.0.1:8861`, `127.0.0.1:8862`, and `127.0.0.1:8863` all triggered one reconnect/replay and then recovered with terminal outputs `APPERR500B`, `APPERRMALB`, and `APPERRTRUNCB`; each log recorded `POST /responses = 3` | Confirmed for the current interactive second-turn text path |
-| The current tested Claude CLI paths did not call `/v1/messages/count_tokens` | Anthropic gateway docs require the endpoint, and Anthropic `Count tokens in a Message` docs define a response containing `input_tokens`: <https://code.claude.com/docs/en/llm-gateway>, <https://platform.claude.com/docs/en/api/messages/count_tokens> | Local loopback success probes for `claude --bare -p`, default `claude -p`, `claude --bare -p` plus `-r` resume, interactive `claude --bare`, default interactive `claude`, `claude -p -c`, a real `claude -p` tool-use roundtrip, and `claude -p --verbose --output-format stream-json` all recorded only `POST /v1/messages`; all eight paths had `0` observed `POST /v1/messages/count_tokens` | Confirmed for current tested Claude paths |
-| The default `claude -p` tool-use path now has direct `400 / 500 / malformed-sse / truncated-sse` terminal evidence on the second `/v1/messages` call | Local loopback tool-roundtrip probe on `127.0.0.1:8840` forced a first-turn `Read` tool_use and a second-call `400 {"type":"error","error":{"type":"invalid_request_error","message":"forced 400 from local tool-roundtrip probe"}}`; the terminal printed `API Error: 400 ...`, and the probe log recorded `POST /v1/messages = 2` with the second request already carrying `tool_result` | Local loopback tool-roundtrip probes on `127.0.0.1:8841`, `8842`, and `8843` showed: `500` produced `POST /v1/messages = 8` with no visible terminal error text in a local `30s` time-bounded PTY run; `malformed-sse` printed `Could not parse message into JSON: {not-json}` then `undefined is not an object (evaluating '_.input_tokens')` with `POST /v1/messages = 3`; `truncated-sse` printed `undefined is not an object (evaluating '_.input_tokens')` with `POST /v1/messages = 3`; all three probes confirmed the second request already carried `tool_result` | Confirmed for the current default tool-use path |
+| The current tested Claude CLI paths did not call `/v1/messages/count_tokens` | Anthropic gateway docs require the endpoint, and Anthropic `Count tokens in a Message` docs define a response containing `input_tokens`: <https://code.claude.com/docs/en/llm-gateway>, <https://platform.claude.com/docs/en/api/messages/count_tokens> | Local loopback success probes for `claude`, default `claude`, `claude` plus `-r` resume, interactive `claude --bare`, default interactive `claude`, `claude --continue`, a real `claude` tool-use roundtrip, and `claude` all recorded only `POST /v1/messages`; all eight paths had `0` observed `POST /v1/messages/count_tokens` | Confirmed for current tested Claude paths |
+| The default `claude` tool-use path now has direct `400 / 500 / malformed-sse / truncated-sse` terminal evidence on the second `/v1/messages` call | Local loopback tool-roundtrip probe on `127.0.0.1:8840` forced a first-turn `Read` tool_use and a second-call `400 {"type":"error","error":{"type":"invalid_request_error","message":"forced 400 from local tool-roundtrip probe"}}`; the terminal printed `API Error: 400 ...`, and the probe log recorded `POST /v1/messages = 2` with the second request already carrying `tool_result` | Local loopback tool-roundtrip probes on `127.0.0.1:8841`, `8842`, and `8843` showed: `500` produced `POST /v1/messages = 8` with no visible terminal error text in a local `30s` time-bounded PTY run; `malformed-sse` printed `Could not parse message into JSON: {not-json}` then `undefined is not an object (evaluating '_.input_tokens')` with `POST /v1/messages = 3`; `truncated-sse` printed `undefined is not an object (evaluating '_.input_tokens')` with `POST /v1/messages = 3`; all three probes confirmed the second request already carried `tool_result` | Confirmed for the current default tool-use path |
 | The primary direct route is model-like, not task-like | Official source `cloud-tasks-client/src/http.rs` shows `/wham/tasks` is used by the cloud-task helper layer, while the built-in provider is separately configurable via `openai_base_url`: <https://github.com/openai/codex/blob/main/codex-rs/cloud-tasks-client/src/http.rs>, <https://github.com/openai/codex/blob/main/codex-rs/config/src/config_toml.rs> | Local probe of `codex exec` with both overrides hit `/responses` for inference and did not rely on `/wham/tasks` before the turn failed | Confirmed |
 | `codex app-server` is a stateful agent/control protocol, not a plain model API | Official README: `codex app-server` powers rich interfaces; protocol is JSON-RPC with `Thread`, `Turn`, and `Item`: <https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md> | Local `codex app-server --help` exposes an experimental server process; the README also documents `turn/start`, streaming `item/*` events, approvals, and auth/account endpoints | Confirmed |
 | `codex app-server` is subscription-aware | Official README documents `account/updated`, `planType`, and `account/rateLimits/read`: <https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md> | Local `codex login status` confirms this machine is currently running on the ChatGPT auth path, not the API key path | Confirmed |
@@ -280,7 +280,7 @@ The next round of work should produce implementation-grade evidence for the dire
 3. Extend current error-surface coverage from the current interactive GitHub sample to other interactive app families and other untested entrances.
 4. Expand tool-layer work from family-level acceptance to higher-risk concrete tool instances and business semantics.
 
-The app-server bridge remains the documented fallback. The direct adapter is now the architecture target. It now has a verified local success contract, a verified real upstream success capture, a verified required-field reduction for the current text path, verified HTTP-only coverage across current non-interactive resume paths, current non-interactive `features.apps=true` `exec/exec resume` text paths, the current interactive `features.apps=true` first-turn plus same-session second-turn and third-turn text paths, and one interactive GitHub app business action, a validated error-compatibility matrix for the current Claude and Codex CLI paths plus direct interactive `/responses` `400 / 500 / malformed-sse / truncated-sse` evidence for the current `features.apps=true` first-turn and same-session second-turn text paths, direct default `claude -p` tool-use `400 / 500 / malformed-sse / truncated-sse` evidence on the Anthropic edge, and direct sidecar `404 / 500` evidence for one interactive GitHub app tool round, a four-sample decoded request-body comparison for current first-turn paths, a verified answer that the currently observed `/backend-api` sidecar requests are not hard dependencies for the current non-interactive main path, the current non-interactive `features.apps=true` text resume path, or the current interactive `features.apps=true` first-turn plus same-session second-turn and third-turn text paths, and a verified split result that one real GitHub app business action still hard-depends on sidecar even though the paired `/responses` path stays healthy; it still needs more app families and higher-risk tool-instance coverage before it becomes implementation-ready.
+The app-server bridge remains the documented fallback. The direct adapter is now the architecture target. It now has a verified local success contract, a verified real upstream success capture, a verified required-field reduction for the current text path, verified HTTP-only coverage across current non-interactive resume paths, current non-interactive `features.apps=true` `exec/exec resume` text paths, the current interactive `features.apps=true` first-turn plus same-session second-turn and third-turn text paths, and one interactive GitHub app business action, a validated error-compatibility matrix for the current Claude and Codex CLI paths plus direct interactive `/responses` `400 / 500 / malformed-sse / truncated-sse` evidence for the current `features.apps=true` first-turn and same-session second-turn text paths, direct default `claude` tool-use `400 / 500 / malformed-sse / truncated-sse` evidence on the Anthropic edge, and direct sidecar `404 / 500` evidence for one interactive GitHub app tool round, a four-sample decoded request-body comparison for current first-turn paths, a verified answer that the currently observed `/backend-api` sidecar requests are not hard dependencies for the current non-interactive main path, the current non-interactive `features.apps=true` text resume path, or the current interactive `features.apps=true` first-turn plus same-session second-turn and third-turn text paths, and a verified split result that one real GitHub app business action still hard-depends on sidecar even though the paired `/responses` path stays healthy; it still needs more app families and higher-risk tool-instance coverage before it becomes implementation-ready.
 
 ## 11. Source Index
 
@@ -577,7 +577,7 @@ Observed strict-minimal success:
 
 ### A.12 Claude tool inventory and current `/responses` tool inventory
 
-Observed `claude --bare -p` capture:
+Observed `claude` capture:
 
 ```text
 tools_len: 4
@@ -587,7 +587,7 @@ Read
 advisor (type advisor_20260301)
 ```
 
-Observed `claude -p` capture:
+Observed `claude` capture:
 
 ```text
 tools_len: 56
@@ -636,7 +636,7 @@ Accepted bare tool subset:
 
 ```text
 converted tools: 3
-source: claude --bare -p
+source: claude
 result:
 {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Done"}}
 {"type":"turn.completed","usage":{"input_tokens":20203,"cached_input_tokens":0,"output_tokens":143}}
@@ -646,7 +646,7 @@ Accepted default Claude tool inventory:
 
 ```text
 converted tools: 55
-source: claude -p
+source: claude
 result:
 {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Yes"}}
 {"type":"turn.completed","usage":{"input_tokens":46352,"cached_input_tokens":0,"output_tokens":98}}
@@ -878,7 +878,7 @@ Official Advisor docs now state:
 Local probe result with a loopback Anthropic mock:
 
 ```text
-claude --bare -p --output-format json --session-id 22222222-2222-4222-8222-222222222222 ...
+claude --session-id 22222222-2222-4222-8222-222222222222 ...
 result: "Advisor consulted. Final answer from the first turn."
 ```
 
@@ -1040,7 +1040,7 @@ truncated-sse:
   POST /responses count: 6
 ```
 
-Observed `/v1/messages` probe results for `claude --bare -p`:
+Observed `/v1/messages` probe results for `claude`:
 
 ```text
 json-400:
@@ -1102,7 +1102,7 @@ POST /backend-api/codex/analytics-events/events -> 500
 
 ### A.24 Current `count_tokens` observation probes
 
-Observed `claude --bare -p` run:
+Observed `claude` run:
 
 ```text
 probe           -> http://127.0.0.1:8799
@@ -1112,7 +1112,7 @@ count_tokens    -> 0 x POST /v1/messages/count_tokens
 shape           -> haiku title request + sonnet main request
 ```
 
-Observed default `claude -p` run:
+Observed default `claude` run:
 
 ```text
 probe           -> http://127.0.0.1:8800
@@ -1122,7 +1122,7 @@ count_tokens    -> 0 x POST /v1/messages/count_tokens
 shape           -> single sonnet request with 56 tools
 ```
 
-Observed `claude --bare -p` + `-r` resume run:
+Observed `claude` + `-r` resume run:
 
 ```text
 probe           -> http://127.0.0.1:8801
@@ -1193,7 +1193,7 @@ count_tokens    -> 0 x POST /v1/messages/count_tokens
 shape           -> haiku title request + sonnet main request with 33 tools
 ```
 
-Observed `claude -p -c` run:
+Observed `claude --continue` run:
 
 ```text
 probe           -> http://127.0.0.1:8804
@@ -1204,7 +1204,7 @@ count_tokens    -> 0 x POST /v1/messages/count_tokens
 shape           -> first run: 1 sonnet request; continue run: 1 sonnet request with 3 messages
 ```
 
-Observed default `claude -p` tool roundtrip:
+Observed default `claude` tool roundtrip:
 
 ```text
 probe           -> http://127.0.0.1:8805
@@ -1214,16 +1214,16 @@ count_tokens    -> 0 x POST /v1/messages/count_tokens
 shape           -> first run returned Read tool_use; second request carried final user content type tool_result
 ```
 
-Observed `claude -p --verbose --output-format stream-json` run:
+Observed `claude` run:
 
 ```text
 probe            -> http://127.0.0.1:8896
-invalid command  -> claude -p --output-format stream-json
-invalid result   -> Error: When using --print, --output-format=stream-json requires --verbose
-valid command    -> claude -p --verbose --output-format stream-json
+invalid command  -> claude
+invalid result   -> Error: legacy non-interactive probe required verbose mode
+valid command    -> claude
 observed calls   -> 1 x POST /v1/messages
 count_tokens     -> 0 x POST /v1/messages/count_tokens
-shape            -> /v1/messages?beta=true; stream-json completed successfully
+shape            -> /v1/messages?beta=true; response completed successfully
 ```
 
 ### A.26 Current interactive `features.apps=true` `/responses` 400 and 500 probes
@@ -1660,18 +1660,18 @@ forward delta    -> GET /responses = 7, POST /responses = 5, 200 responses = 5
 blocker mode     -> 500
 ```
 
-### A.38 Current stream-json `count_tokens` probe
+### A.38 Current `count_tokens` probe
 
-Observed stream-json run:
+Observed `claude` run:
 
 ```text
 probe            -> http://127.0.0.1:8896
-invalid command  -> claude -p --output-format stream-json
-invalid result   -> Error: When using --print, --output-format=stream-json requires --verbose
-valid command    -> claude -p --verbose --output-format stream-json
+invalid command  -> claude
+invalid result   -> Error: legacy non-interactive probe required verbose mode
+valid command    -> claude
 observed calls   -> 1 x POST /v1/messages
 count_tokens     -> 0 x POST /v1/messages/count_tokens
-shape            -> /v1/messages?beta=true; stream-json completed successfully
+shape            -> /v1/messages?beta=true; response completed successfully
 ```
 
 ### A.39 Current high-risk concrete `mcp__...` tool roundtrip probe

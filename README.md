@@ -87,10 +87,12 @@ ModelBridge is designed to be used through `ANTHROPIC_BASE_URL`.
 Example:
 
 ```bash
-ANTHROPIC_BASE_URL=http://127.0.0.1:4317
-ANTHROPIC_AUTH_TOKEN=<gateway-token>
-claude --bare -p --output-format json 'Reply exactly SMOKEOK.'
+export ANTHROPIC_BASE_URL=http://127.0.0.1:4317
+export ANTHROPIC_AUTH_TOKEN=<gateway-token>
+claude
 ```
+
+In the Claude TUI, enter: `Reply exactly SMOKEOK.`
 
 The app can copy the exact env snippet for the current local configuration. Internally, the daemon validates the incoming token through the configured `x-api-key` header.
 

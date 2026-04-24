@@ -38,12 +38,12 @@ Date: 2026-04-20
 | `/responses` 成功响应形状 | 已验证（当前路径） | 已拿到一条真实上游成功样本，并已验证把它裁到本地最小契约后仍能 `turn.completed` |
 | `/responses` websocket 是否必须 | 已验证（当前已测路径） | 当前 `codex exec --json` 单轮文本、单轮工具回合、`codex exec resume --json` 多轮文本、resumed native tool path、非交互 `features.apps=true` 的 `codex exec/exec resume` 文本路径，以及交互 `codex --no-alt-screen` 的 `features.apps=true` 首轮、同会话第二轮、同会话第三轮文本路径和一条交互 GitHub app 业务动作都可在 websocket `404` 后回落 HTTP 成功 |
 | zstd 请求体字段解码 | 已验证（当前四份首轮样本） | 已解出 4 份 `/responses` 首轮请求体；顶层骨架一致，差异集中在工具清单 |
-| 当前错误兼容矩阵 | 已验证（当前路径） | 已拿到 `codex exec --json`、`claude --bare -p`、默认 `claude -p` tool-use 回合的 `400 / 500 / 畸形 SSE / 断流` 第一版矩阵；交互 `codex --no-alt-screen` 且 `features.apps=true` 的首轮与同会话第二轮文本路径也已补齐 `/responses` `400 / 500 / 畸形 SSE / 断流` 外观；非交互与交互 GitHub app、非交互 Gmail app、非交互 Notion app 的 sidecar 故障外观也已补齐 |
+| 当前错误兼容矩阵 | 已验证（当前路径） | 已拿到 `codex exec --json`、`claude`、默认 `claude` tool-use 回合的 `400 / 500 / 畸形 SSE / 断流` 第一版矩阵；交互 `codex --no-alt-screen` 且 `features.apps=true` 的首轮与同会话第二轮文本路径也已补齐 `/responses` `400 / 500 / 畸形 SSE / 断流` 外观；非交互与交互 GitHub app、非交互 Gmail app、非交互 Notion app 的 sidecar 故障外观也已补齐 |
 | 辅助产品面依赖 | 已验证（当前已测路径） | 当前非交互 `features.apps=false` 主路径、非交互 `features.apps=true` 的 `exec/exec resume` 文本路径，以及交互 `features.apps=true` 的首轮、同会话第二轮、同会话第三轮文本路径，在当前已观测 `/backend-api/...` sidecar 请求统一 `404` 与统一 `500` 下都仍能完成；同时当前真实 GitHub、Gmail、Notion app 业务动作已验证：forward-only 对照成功，sidecar `404/500` 会破坏当前业务动作 |
-| Claude `count_tokens` 触发时机 | 已验证（当前已测路径） | `claude --bare -p`、`claude -p`、`-r` 续轮、交互 bare、默认交互 `claude`、`claude -p -c`、默认 `claude -p` tool roundtrip、`claude -p --verbose --output-format stream-json` 都未观测到 `/v1/messages/count_tokens`；官方文档仍要求网关提供 endpoint |
+| Claude `count_tokens` 触发时机 | 已验证（当前已测路径） | `claude`、`claude`、`-r` 续轮、交互 bare、默认交互 `claude`、`claude --continue`、默认 `claude` tool roundtrip、`claude` 都未观测到 `/v1/messages/count_tokens`；官方文档仍要求网关提供 endpoint |
 | Public Responses API 直转发 | 已验证不可用 | 同样的 Bearer 和 body 转发到 `api.openai.com/v1/responses` 返回 `401` 和 `api.responses.write` scope 缺失 |
 | Claude tool-use 到上游工具语义的映射 | 已验证（实例级） | 函数工具声明层重写已被真实远端接受；`Bash / Read / Edit / WebSearch / Agent / Write / TodoWrite / AskUserQuestion / mcp__claude_ai_Google_Drive__authenticate / mcp__plugin_Notion_notion__authenticate` 的 tool call / tool result 往返已验证；官方 `Advisor tool` 契约已找到；真实 `claude` 已接受 `server_tool_use + advisor_tool_result`，且 `/responses` synthetic advisor bridge 已验证成功 |
-| 本地 gateway 正式代码 | 已进入运行态 | Swift package 当前已编译通过；`/v1/messages` 已从 `501` 升级为真实桥接；真实 `claude --bare -p` 文本、`Read` 工具回合、advisor 路径都已指向本地 daemon 成功完成 |
+| 本地 gateway 正式代码 | 已进入运行态 | Swift package 当前已编译通过；`/v1/messages` 已从 `501` 升级为真实桥接；真实 `claude` 文本、`Read` 工具回合、advisor 路径都已指向本地 daemon 成功完成 |
 | Connector diagnostics | 已验证 | 新 `/health` 样本已经返回 `traceDiagnostics`，包含最近 stage 计数、function call 名称、connector 名称和本地 auth reject 路径 |
 | Launch at login API 接线 | 已验证（API/编译） | `SMAppService.mainApp`、`Status` 枚举和 `register()/unregister()` 调用形状已在本机编译通过；真实 packaged-app register/unregister 仍待系统状态级验证 |
 | Signing / notarization | 已拆分并确认阻断 | `security find-identity -v -p codesigning` 当前返回 `0 valid identities found`，所以本机只能交付脚本与 runbook，不能做真实签名与公证 |
@@ -124,14 +124,14 @@ Date: 2026-04-20
   - connector diagnostics 摘要
   - Swift Testing 覆盖配置持久化与本地 token 校验
 - `Claude Code CLI` 指向本地 daemon 后，当前真实命令已验证：
-  - `claude --bare -p 'Reply exactly DEFAULTOK.'` -> `DEFAULTOK`
-  - `claude --bare -p --output-format json 'Reply exactly CCRUN.'` -> `result = "CCRUN"`
-  - `claude -p --output-format json 'Reply exactly FULLTOOLOK.'` -> `result = "FULLTOOLOK"`
-  - `claude --bare -p --output-format json 'Use the Bash tool ...'` -> `result = "BASHOK"`
-  - `claude --bare -p --output-format json 'Use the Read tool ...'` -> 完整 tool roundtrip 成功
-  - `claude --bare -p --output-format json 'Use the advisor tool ...'` -> `result = "ADVISOROK"`
-  - `claude -p --output-format json 'Call the mcp__plugin_Notion_notion__authenticate tool ...'` -> `result = "NOTIONAUTHSEEN"`
-  - `claude --bare -p --output-format json 'Reply exactly FINALSMOKEOK.'` -> `result = "FINALSMOKEOK"`
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly DEFAULTOK.`） -> `DEFAULTOK`
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly CCRUN.`） -> `result = "CCRUN"`
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly FULLTOOLOK.`） -> `result = "FULLTOOLOK"`
+  - 交互式 `claude` TUI（输入 prompt: `Use the Bash tool ...`） -> `result = "BASHOK"`
+  - 交互式 `claude` TUI（输入 prompt: `Use the Read tool ...`） -> 完整 tool roundtrip 成功
+  - 交互式 `claude` TUI（输入 prompt: `Use the advisor tool ...`） -> `result = "ADVISOROK"`
+  - 交互式 `claude` TUI（输入 prompt: `Call the mcp__plugin_Notion_notion__authenticate tool ...`） -> `result = "NOTIONAUTHSEEN"`
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly FINALSMOKEOK.`） -> `result = "FINALSMOKEOK"`
   - `bash scripts/smoke_local_gateway.sh` -> `Smoke validation passed`
 - 当前自动化验证已完成：
   - `swift build`
@@ -147,7 +147,7 @@ Date: 2026-04-20
 当前还需要注意的运行边界：
 
 - 当前本地 gateway 已验证：
-  - 默认 `claude -p` 的完整工具清单可被桥接到 `/responses`
+  - 默认 `claude` 的完整工具清单可被桥接到 `/responses`
   - `advisor` 后续再触发普通 function call 的回合已修复
 - 当前 `Write` / `Edit` 的强制验收 prompt 仍会受到模型自行改写路径或工具选择的影响；现有 trace 已证明当前 daemon 收到了 `Write` 与 `Edit` 的真实 function call，并完成了后续 `tool_result` continuation，但这两条 CLI prompt 还不能拿来当稳定金标准
 

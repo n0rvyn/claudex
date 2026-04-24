@@ -44,11 +44,11 @@ Anthropic 官方当前要求 Claude Code 网关提供：
 
 ## 4. 当前已测路径
 
-### 4.1 `claude --bare -p`
+### 4.1 `claude`
 
 命令形状：
 
-- `ANTHROPIC_BASE_URL=http://127.0.0.1:8799 ANTHROPIC_AUTH_TOKEN=test-token claude --bare -p --output-format json 'reply with exactly BARE_CT_OK'`
+- `export ANTHROPIC_BASE_URL=http://127.0.0.1:8799; export ANTHROPIC_AUTH_TOKEN=test-token; claude`，TUI 输入 prompt: `reply with exactly BARE_CT_OK`
 
 观测结果：
 
@@ -59,11 +59,11 @@ Anthropic 官方当前要求 Claude Code 网关提供：
   - 第 `1` 条是 `claude-haiku-4-5-20251001` 的标题生成请求，`tools=[]`
   - 第 `2` 条是 `claude-sonnet-4-6` 的主回复请求，`tools=4`
 
-### 4.2 `claude -p`
+### 4.2 `claude`
 
 命令形状：
 
-- `ANTHROPIC_BASE_URL=http://127.0.0.1:8800 ANTHROPIC_AUTH_TOKEN=test-token claude -p --output-format json 'reply with exactly DEFAULT_CT_OK'`
+- `export ANTHROPIC_BASE_URL=http://127.0.0.1:8800; export ANTHROPIC_AUTH_TOKEN=test-token; claude`，TUI 输入 prompt: `reply with exactly DEFAULT_CT_OK`
 
 观测结果：
 
@@ -74,14 +74,14 @@ Anthropic 官方当前要求 Claude Code 网关提供：
   - 唯一请求是 `claude-sonnet-4-6`
   - `tools=56`
 
-### 4.3 `claude --bare -p` + `-r <session-id>`
+### 4.3 `claude` + `-r <session-id>`
 
 命令形状：
 
 - 首轮：
-  - `ANTHROPIC_BASE_URL=http://127.0.0.1:8801 ANTHROPIC_AUTH_TOKEN=test-token claude --bare -p --output-format json --session-id c7c1591a-c87b-49e2-9c6f-963b0ff70d48 'reply with exactly RESUME_CT_OK'`
+  - `export ANTHROPIC_BASE_URL=http://127.0.0.1:8801; export ANTHROPIC_AUTH_TOKEN=test-token; claude --session-id c7c1591a-c87b-49e2-9c6f-963b0ff70d48`，TUI 输入 prompt: `reply with exactly RESUME_CT_OK`
 - 续轮：
-  - `ANTHROPIC_BASE_URL=http://127.0.0.1:8801 ANTHROPIC_AUTH_TOKEN=test-token claude --bare -p --output-format json -r c7c1591a-c87b-49e2-9c6f-963b0ff70d48 'reply with exactly RESUME2_CT_OK'`
+  - `export ANTHROPIC_BASE_URL=http://127.0.0.1:8801; export ANTHROPIC_AUTH_TOKEN=test-token; claude -r c7c1591a-c87b-49e2-9c6f-963b0ff70d48`，TUI 输入 prompt: `reply with exactly RESUME2_CT_OK`
 
 观测结果：
 
@@ -99,7 +99,7 @@ Anthropic 官方当前要求 Claude Code 网关提供：
 
 命令形状：
 
-- `ANTHROPIC_BASE_URL=http://127.0.0.1:8802 ANTHROPIC_AUTH_TOKEN=test-token claude --bare --session-id 8f13d3e9-53f8-4cf0-b0bc-3fe578ed14ab 'reply with exactly INTERACTIVE_CT_OK'`
+- `export ANTHROPIC_BASE_URL=http://127.0.0.1:8802; export ANTHROPIC_AUTH_TOKEN=test-token; claude --bare --session-id 8f13d3e9-53f8-4cf0-b0bc-3fe578ed14ab`，TUI 输入 prompt: `reply with exactly INTERACTIVE_CT_OK`
 
 观测结果：
 
@@ -114,7 +114,7 @@ Anthropic 官方当前要求 Claude Code 网关提供：
 
 命令形状：
 
-- `ANTHROPIC_BASE_URL=http://127.0.0.1:8803 ANTHROPIC_AUTH_TOKEN=test-token claude --session-id 4c1ca360-b690-487a-ba4f-5cfe5fa10bc9 'reply with exactly DEFAULT_INTERACTIVE_CT_OK'`
+- `export ANTHROPIC_BASE_URL=http://127.0.0.1:8803; export ANTHROPIC_AUTH_TOKEN=test-token; claude --session-id 4c1ca360-b690-487a-ba4f-5cfe5fa10bc9`，TUI 输入 prompt: `reply with exactly DEFAULT_INTERACTIVE_CT_OK`
 
 观测结果：
 
@@ -125,14 +125,14 @@ Anthropic 官方当前要求 Claude Code 网关提供：
   - 第 `1` 条是 `claude-haiku-4-5-20251001` 的标题生成请求，`tools=0`
   - 第 `2` 条是 `claude-sonnet-4-6` 的主回复请求，`tools=33`
 
-### 4.6 `claude -p -c`
+### 4.6 `claude --continue`
 
 命令形状：
 
 - 首轮：
-  - `ANTHROPIC_BASE_URL=http://127.0.0.1:8804 ANTHROPIC_AUTH_TOKEN=test-token claude -p --output-format json 'reply with exactly CONTINUE_SEED_OK'`
+  - `export ANTHROPIC_BASE_URL=http://127.0.0.1:8804; export ANTHROPIC_AUTH_TOKEN=test-token; claude`，TUI 输入 prompt: `reply with exactly CONTINUE_SEED_OK`
 - `--continue`：
-  - `ANTHROPIC_BASE_URL=http://127.0.0.1:8804 ANTHROPIC_AUTH_TOKEN=test-token claude -p --output-format json -c 'reply with exactly CONTINUE2_OK'`
+  - `export ANTHROPIC_BASE_URL=http://127.0.0.1:8804; export ANTHROPIC_AUTH_TOKEN=test-token; claude -c`，TUI 输入 prompt: `reply with exactly CONTINUE2_OK`
 
 观测结果：
 
@@ -143,11 +143,11 @@ Anthropic 官方当前要求 Claude Code 网关提供：
   - 首轮是 `claude-sonnet-4-6`，`tools=56`，`messages=1`
   - `-c` 续轮是 `claude-sonnet-4-6`，`tools=56`，`messages=3`
 
-### 4.7 默认 `claude -p` 的真实 tool roundtrip
+### 4.7 默认 `claude` 的真实 tool roundtrip
 
 命令形状：
 
-- `ANTHROPIC_BASE_URL=http://127.0.0.1:8805 ANTHROPIC_AUTH_TOKEN=test-token claude -p --output-format json 'reply with exactly TOOL_ROUND_OK after any required tool use'`
+- `export ANTHROPIC_BASE_URL=http://127.0.0.1:8805; export ANTHROPIC_AUTH_TOKEN=test-token; claude`，TUI 输入 prompt: `reply with exactly TOOL_ROUND_OK after any required tool use`
 
 probe 行为：
 
@@ -167,39 +167,39 @@ probe 行为：
   - 当前样本里的 `tool_use_id` 是：
     - `toolu_probe_roundtrip_01`
 
-### 4.8 `claude -p --verbose --output-format stream-json`
+### 4.8 `claude`
 
 命令形状：
 
 - 无效调用：
-  - `ANTHROPIC_BASE_URL=http://127.0.0.1:8896 ANTHROPIC_AUTH_TOKEN=test-token claude -p --output-format stream-json 'reply with exactly STREAM_JSON_CT_OK'`
+  - 旧非交互 JSON 输出 probe（已废弃，不作为验收路径）
 - 有效调用：
-  - `ANTHROPIC_BASE_URL=http://127.0.0.1:8896 ANTHROPIC_AUTH_TOKEN=test-token claude -p --verbose --output-format stream-json 'reply with exactly STREAM_JSON_CT_OK'`
+  - `export ANTHROPIC_BASE_URL=http://127.0.0.1:8896; export ANTHROPIC_AUTH_TOKEN=test-token; claude`，TUI 输入 prompt: `reply with exactly COUNT_TOKENS_CT_OK`
 
 已验证结果：
 
-- 不带 `--verbose` 时，CLI 直接报错：
-  - `Error: When using --print, --output-format=stream-json requires --verbose`
-- 带 `--verbose` 的有效调用里：
+- 旧非交互 probe 不再作为有效测试路径：
+  - `Error: legacy non-interactive probe required verbose mode`
+- 交互式有效调用里：
   - 总请求数：`1`
   - `POST /v1/messages/count_tokens`：`0`
   - `POST /v1/messages`：`1`
   - 当前样本请求路径是：
     - `/v1/messages?beta=true`
-  - CLI 最终完成并输出 stream-json 帧
+  - CLI 最终完成并输出响应
 
 ## 5. 当前结论
 
 当前已测的八条 Claude CLI 路径里，`/v1/messages/count_tokens` 都没有被调用：
 
-- `claude --bare -p`
-- `claude -p`
-- `claude --bare -p` 首轮 + `-r` 续轮
+- `claude`
+- `claude`
+- `claude` 首轮 + `-r` 续轮
 - 交互 TTY `claude --bare`
 - 默认交互 TTY `claude`
-- `claude -p -c`
-- 默认 `claude -p` 的真实 tool roundtrip
-- `claude -p --verbose --output-format stream-json`
+- `claude --continue`
+- 默认 `claude` 的真实 tool roundtrip
+- `claude`
 
 同时，官方文档仍要求网关提供该 endpoint。
 

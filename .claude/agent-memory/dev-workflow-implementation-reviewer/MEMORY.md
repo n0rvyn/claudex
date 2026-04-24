@@ -1,0 +1,1 @@
+- [ModelBridge trace isolation quirk](modelbridge_trace_isolation.md) — TraceLogger.shared is process-global; meta-assertion tests on mtime race against Swift Testing parallel runs

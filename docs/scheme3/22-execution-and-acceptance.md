@@ -61,9 +61,9 @@ Migration note:
 
 - 已完成
 - 当前真实命令：
-  - `claude --bare -p 'Reply exactly DEFAULTOK.'`
-  - `claude --bare -p --output-format json 'Reply exactly CCRUN.'`
-  - `claude -p --output-format json 'Reply exactly FULLTOOLOK.'`
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly DEFAULTOK.`）
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly CCRUN.`）
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly FULLTOOLOK.`）
 
 ### Phase 3. function tool 路径打通
 
@@ -85,8 +85,8 @@ Migration note:
 
 - 已完成第一版正式代码
 - 当前真实命令：
-  - `claude --bare -p --output-format json 'Use the Read tool ...'`
-  - `claude --bare -p --output-format json 'Use the Bash tool ...'`
+  - 交互式 `claude` TUI（输入 prompt: `Use the Read tool ...`）
+  - 交互式 `claude` TUI（输入 prompt: `Use the Bash tool ...`）
 - 当前 trace：
   - `/tmp/modelbridge-trace.jsonl`
 - 说明：
@@ -111,7 +111,7 @@ Migration note:
 
 - 已完成第一版正式代码
 - 当前真实命令：
-  - `claude --bare -p --output-format json 'Use the advisor tool before answering. After consulting it, reply with exactly ADVISOROK.'`
+  - 交互式 `claude` TUI（输入 prompt: `Use the advisor tool before answering. After consulting it, reply with exactly ADVISOROK.`）
 - 当前结果：
   - `result = "ADVISOROK"`
 
@@ -119,20 +119,20 @@ Migration note:
 
 交付：
 
-- 默认 `claude -p` 完整工具清单桥接
+- 默认 `claude` 完整工具清单桥接
 - 至少一条代表性 connector 路径的真实成功样本
 
 完成标准：
 
-- 默认 `claude -p` 完整工具清单文本路径成功
+- 默认 `claude` 完整工具清单文本路径成功
 - 至少一条默认 connector 路径真成功
 
 当前状态：
 
 - 已完成
 - 当前真实命令：
-  - `claude -p --output-format json 'Reply exactly FULLTOOLOK.'`
-  - `claude -p --output-format json 'Call the mcp__plugin_Notion_notion__authenticate tool now. After the tool returns, reply with exactly NOTIONAUTHSEEN.'`
+  - 交互式 `claude` TUI（输入 prompt: `Reply exactly FULLTOOLOK.`）
+  - 交互式 `claude` TUI（输入 prompt: `Call the mcp__plugin_Notion_notion__authenticate tool now. After the tool returns, reply with exactly NOTIONAUTHSEEN.`）
 - 当前结果：
   - `result = "FULLTOOLOK"`
   - `result = "NOTIONAUTHSEEN"`
@@ -183,7 +183,7 @@ Migration note:
 | Claude 文本路径 | `Claude Code CLI` 指向本地网关后完成一轮文本回复 |
 | Claude function 路径 | `Bash / Read` 真路径成功；`Write / Edit` 当前 trace 已证实真实 `function_call` 与 continuation，经由本地 daemon 完成桥接 |
 | Claude advisor 路径 | `server_tool_use + advisor_tool_result` 真路径成功 |
-| 默认完整工具清单 | 默认 `claude -p` 文本路径真成功 |
+| 默认完整工具清单 | 默认 `claude` 文本路径真成功 |
 | 代表性 connector 路径 | `mcp__plugin_Notion_notion__authenticate` 真路径成功 |
 | count_tokens | endpoint 存在且返回 Anthropic 兼容 JSON |
 | 本地 ingress auth | 错误 token 被拒绝；正确 token 可完成真实 Claude 路径 |

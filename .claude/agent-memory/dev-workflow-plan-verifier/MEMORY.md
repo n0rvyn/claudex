@@ -1,0 +1,1 @@
+- [AnthropicBridge streaming post-commit gap](project_anthropic_bridge_stream_post_commit.md) — `handleMessages` returns `HTTPResponse(200, stream:)` before any `/responses` call; 401 retry must sit before headers flush

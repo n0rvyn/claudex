@@ -20,7 +20,7 @@ Date: 2026-04-20
 - `claude 2.1.114`
 - 本地 loopback probe
 - `codex exec --json`
-- `claude --bare -p`
+- `claude`
 - 交互 TTY `codex --no-alt-screen` 的当前首轮文本路径
 - 交互 TTY `codex --no-alt-screen --enable apps` 的当前 GitHub app 工具回合 sidecar 故障路径
 - `features.apps=true` 的当前首轮与同会话第二轮文本路径
@@ -28,7 +28,7 @@ Date: 2026-04-20
 本页不外推到：
 
 - Claude 交互会话
-- Claude 默认 `-p` 工具路径
+- Claude 默认交互式工具路径
 - 交互 TUI 的第三轮及以上回合
 - 交互 `features.apps=true` 的 apps 工具回合
 - 其他未验证 CLI 入口
@@ -172,7 +172,7 @@ Date: 2026-04-20
 - 当前 Notion app 业务动作在 sidecar `404/500` 下都失败
 - 当前 Notion 家族的失败点稳定落在 MCP 握手阶段
 
-## 4. `/v1/messages` -> `claude --bare -p` 错误矩阵
+## 4. `/v1/messages` -> `claude` 错误矩阵
 
 固定测试条件：
 
@@ -190,32 +190,32 @@ Date: 2026-04-20
 
 当前样本还确认：
 
-- 简单 `claude --bare -p` 请求不是单发；当前 `400` 样本里已经观察到 `2` 个 `POST /v1/messages`
+- 简单 `claude` 请求不是单发；当前 `400` 样本里已经观察到 `2` 个 `POST /v1/messages`
 - 当前 `500` clean sample 在 `15s` 内观察到 `10` 个 `POST /v1/messages`
 - 当前 `400` 和 `500` 的服务端 body 形状不同，但只有 `400` 被终端原样打印
 
-### 4.1 `/v1/messages` -> 默认 `claude -p` tool-use 回合错误矩阵
+### 4.1 `/v1/messages` -> 默认 `claude` tool-use 回合错误矩阵
 
 固定测试条件：
 
 - `ANTHROPIC_BASE_URL=http://127.0.0.1:<probe-port>`
 - `ANTHROPIC_AUTH_TOKEN=test-token`
-- 默认 `claude -p`
+- 默认 `claude`
 - 第 `1` 条 `/v1/messages` 固定返回 `Read` tool_use
 - 第 `2` 条 `/v1/messages` 起按 probe mode 返回错误
 
 | Probe mode | 服务器返回 | 当前终端外观 | 当前样本重放次数 | 当前结论 |
 | --- | --- | --- | --- | --- |
-| `json-400` | 第 `2` 条请求返回 `400 application/json`；body = `{"type":"error","error":{"type":"invalid_request_error","message":"forced 400 from local tool-roundtrip probe"}}` | 终端直接输出 `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"forced 400 from local tool-roundtrip probe"}}` | `POST /v1/messages` = `2` | 默认 `claude -p` tool-use 回合里的 `400` 当前也会直接打印完整 API Error JSON |
-| `json-500` | 第 `2` 条请求起返回 `500 application/json`；body = `{"type":"error","error":{"type":"api_error","message":"forced 500 from local tool-roundtrip probe"}}` | 在一个本地 `30s` time-bounded PTY run 里，终端没有产生可见错误文本；进程由本地 `Ctrl-C` 结束 | `POST /v1/messages` = `8` | 默认 `claude -p` tool-use 回合里的 `500` 当前同样表现成内部重试，不能写成“立即返回终端错误” |
-| `malformed-sse` | 第 `2` 条请求起返回 `200 text/event-stream`；先给合法 `message_start`，随后给非法 JSON `data: {not-json}` | 终端输出 `Could not parse message into JSON: {not-json}`、`From chunk: [ "event: content_block_delta", "data: {not-json}" ]`，最后输出 `undefined is not an object (evaluating '_.input_tokens')` | `POST /v1/messages` = `3` | 默认 `claude -p` tool-use 回合里的畸形 SSE 当前会显式暴露 JSON 解析失败，然后落到同一个内部空值错误 |
-| `truncated-sse` | 第 `2` 条请求起返回 `200 text/event-stream`；给合法前缀后主动断开，不发送结束事件 | 终端输出 `undefined is not an object (evaluating '_.input_tokens')` | `POST /v1/messages` = `3` | 默认 `claude -p` tool-use 回合里的半截 SSE 当前不显示“断流”字样，最终也落到内部空值错误 |
+| `json-400` | 第 `2` 条请求返回 `400 application/json`；body = `{"type":"error","error":{"type":"invalid_request_error","message":"forced 400 from local tool-roundtrip probe"}}` | 终端直接输出 `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"forced 400 from local tool-roundtrip probe"}}` | `POST /v1/messages` = `2` | 默认 `claude` tool-use 回合里的 `400` 当前也会直接打印完整 API Error JSON |
+| `json-500` | 第 `2` 条请求起返回 `500 application/json`；body = `{"type":"error","error":{"type":"api_error","message":"forced 500 from local tool-roundtrip probe"}}` | 在一个本地 `30s` time-bounded PTY run 里，终端没有产生可见错误文本；进程由本地 `Ctrl-C` 结束 | `POST /v1/messages` = `8` | 默认 `claude` tool-use 回合里的 `500` 当前同样表现成内部重试，不能写成“立即返回终端错误” |
+| `malformed-sse` | 第 `2` 条请求起返回 `200 text/event-stream`；先给合法 `message_start`，随后给非法 JSON `data: {not-json}` | 终端输出 `Could not parse message into JSON: {not-json}`、`From chunk: [ "event: content_block_delta", "data: {not-json}" ]`，最后输出 `undefined is not an object (evaluating '_.input_tokens')` | `POST /v1/messages` = `3` | 默认 `claude` tool-use 回合里的畸形 SSE 当前会显式暴露 JSON 解析失败，然后落到同一个内部空值错误 |
+| `truncated-sse` | 第 `2` 条请求起返回 `200 text/event-stream`；给合法前缀后主动断开，不发送结束事件 | 终端输出 `undefined is not an object (evaluating '_.input_tokens')` | `POST /v1/messages` = `3` | 默认 `claude` tool-use 回合里的半截 SSE 当前不显示“断流”字样，最终也落到内部空值错误 |
 
 当前含义：
 
-- 默认 `claude -p` tool-use 回合当前已经有 `400 / 500 / 畸形 SSE / 断流` 的直接终端证据
+- 默认 `claude` tool-use 回合当前已经有 `400 / 500 / 畸形 SSE / 断流` 的直接终端证据
 - 当前第 `2` 条请求都已经确认带了 `tool_result`
-- 默认 `claude -p` tool-use 回合和 `claude --bare -p` 当前错误外观一致；差异主要在重试次数
+- 默认 `claude` tool-use 回合和 `claude` 当前错误外观一致；差异主要在重试次数
 
 ### 4.3 交互 GitHub app 工具回合在 sidecar `404` 与 `500` 下的当前外观
 
@@ -280,7 +280,7 @@ Date: 2026-04-20
   - 当前 GitHub app 工具回合在 sidecar `404/500` 下都会先暴露 `codex_apps` MCP 启动失败
   - 随后的工具阶段都会暴露 `failed to get client`
   - 当前终端外观上，`404` 与 `500` 没有拉开差异
-- `claude --bare -p` 侧：
+- `claude` 侧：
   - `400` 会直接打印完整 API Error JSON
   - `500` 当前表现成客户端内部重试
   - 畸形或半截 SSE 不会稳定收敛到服务端错误类型，而会落到解析失败或内部空值错误

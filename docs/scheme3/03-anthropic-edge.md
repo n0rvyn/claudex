@@ -60,12 +60,12 @@ Date: 2026-04-20
 
 当前已验证：
 
-- `claude --bare -p` 工具总数是 `4`
+- `claude` 工具总数是 `4`
   - `Bash`
   - `Edit`
   - `Read`
   - `advisor`
-- `claude -p` 工具总数是 `56`
+- `claude` 工具总数是 `56`
   - 其中 `55` 个是函数工具
   - `1` 个是 `advisor_20260301`
 
@@ -90,7 +90,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - 这两个 block 都发生在同一个 `/v1/messages` 请求里，不需要客户端再补 `tool_result`
 - 后续多轮必须把 `advisor_tool_result` 一起带回
 
-本机真实 `claude --bare -p` 对本地 mock 的验证已经确认：
+本机真实 `claude` 对本地 mock 的验证已经确认：
 
 - CLI 接受带 `server_tool_use + advisor_tool_result` 的 SSE
 - 用 `-r <session-id>` 续轮时，Claude 会把上一轮 assistant content 中的这两个 block 原样带回
@@ -105,26 +105,26 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 
 - `claude 2.1.114`
 - `claude 2.1.116`
-- `claude --bare -p`
-- `claude -p`
-- `claude --bare -p` 首轮 + `-r` 续轮
+- `claude`
+- `claude`
+- `claude` 首轮 + `-r` 续轮
 - 交互 TTY `claude --bare`
 - 默认交互 TTY `claude`
-- `claude -p -c`
-- 默认 `claude -p` 的真实 tool roundtrip
-- `claude -p --verbose --output-format stream-json`
+- `claude --continue`
+- 默认 `claude` 的真实 tool roundtrip
+- `claude`
 - 本地 `/v1/messages` loopback success probe
 
 当前已验证：
 
 - 八条已测路径里都没有出现：
   - `POST /v1/messages/count_tokens`
-- `claude --bare -p`
+- `claude`
   - 当前样本是 `2` 条 `POST /v1/messages`
   - 先 `haiku title`，再 `sonnet main`
-- `claude -p`
+- `claude`
   - 当前样本是 `1` 条 `POST /v1/messages`
-- `claude --bare -p` 首轮 + `-r` 续轮
+- `claude` 首轮 + `-r` 续轮
   - 当前样本合计 `3` 条 `POST /v1/messages`
   - 续轮阶段是 `1` 条 `POST /v1/messages`
 - 交互 TTY `claude --bare`
@@ -132,14 +132,14 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - 默认交互 TTY `claude`
   - 当前样本是 `2` 条 `POST /v1/messages`
   - 第 `2` 条请求当前观测到 `tools=33`
-- `claude -p -c`
+- `claude --continue`
   - 当前样本合计 `2` 条 `POST /v1/messages`
   - `-c` 续轮阶段的请求当前观测到 `messages=3`
-- 默认 `claude -p` 的真实 tool roundtrip
+- 默认 `claude` 的真实 tool roundtrip
   - 当前样本是 `2` 条 `POST /v1/messages`
   - 第 `2` 条请求当前已观测到最后一个 content block 是：
     - `tool_result`
-- `claude -p --verbose --output-format stream-json`
+- `claude`
   - 不带 `--verbose` 时，CLI 直接报错
   - 带 `--verbose` 的有效调用里，当前样本是 `1` 条 `POST /v1/messages`
 
@@ -168,7 +168,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 当前范围：
 
 - `claude 2.1.114`
-- `claude --bare -p`
+- `claude`
 - 本地 `/v1/messages` loopback probe
 
 当前已验证：
@@ -202,7 +202,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - Claude Code 在 tool-use 回合里的最小响应要求
 - Claude Code 是否要求 Anthropic SSE 的某些特定事件顺序
 - 未来版本里的 `count_tokens` 触发条件
-- Claude 默认 `-p`、交互会话、tool-use 回合里的错误外观
+- Claude 默认交互会话、tool-use 回合里的错误外观
 
 这些内容进入：
 

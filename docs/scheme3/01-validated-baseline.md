@@ -218,8 +218,8 @@ Date: 2026-04-20
 
 已验证：
 
-- 把 `tools` 数组替换成从 `claude --bare -p` 样本转换来的 `3` 个 function tools 后，真实远端仍返回成功
-- 把 `tools` 数组替换成从默认 `claude -p` 样本转换来的 `55` 个 function tools 后，真实远端仍返回成功
+- 把 `tools` 数组替换成从 `claude` 样本转换来的 `3` 个 function tools 后，真实远端仍返回成功
+- 把 `tools` 数组替换成从默认 `claude` 样本转换来的 `55` 个 function tools 后，真实远端仍返回成功
 - 当前转换规则是：
   - `type: "function"`
   - `name`
@@ -241,9 +241,9 @@ Date: 2026-04-20
 
 在当前范围：
 
-- `claude --bare -p`
+- `claude`
 - 当前 `3` 个 function tools
-- 默认 `claude -p` 抓到的 `55` 个 function tools
+- 默认 `claude` 抓到的 `55` 个 function tools
 - 第一段强制 `Bash`
 - 第二段 `tool_output = "success"`
 - websocket `404` 后走 HTTP
@@ -266,7 +266,7 @@ Date: 2026-04-20
 
 - 方案三的工具回合层不再是纯猜测；当前 `Bash` 路径已经在两种函数工具集环境下闭环
 - 未解决范围已经收窄到：
-  - 默认 `claude -p` 里的其它具体工具实例
+  - 默认 `claude` 里的其它具体工具实例
   - `advisor_20260301`
 
 证据：
@@ -279,7 +279,7 @@ Date: 2026-04-20
 
 在当前范围：
 
-- 默认 `claude -p` 抓到的 `55` 个 function tools
+- 默认 `claude` 抓到的 `55` 个 function tools
 - 第一段强制单个函数工具
 - 第二段 `tool_output = "success"`
 - websocket `404` 后走 HTTP
@@ -349,7 +349,7 @@ Date: 2026-04-20
 
 在当前范围：
 
-- 默认 `claude -p` 抓到的真实工具样本包含：
+- 默认 `claude` 抓到的真实工具样本包含：
   - `{"type":"advisor_20260301","name":"advisor","model":"claude-opus-4-7"}`
 - 本地两段代理把这个对象原样追加到改写后的 `tools` 数组
 - 第一段仍强制 `Bash`
@@ -408,7 +408,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
   - `server_tool_use`
   - `advisor_tool_result`
   - `text`
-- `claude --bare -p` 正常完成，并输出：
+- `claude` 正常完成，并输出：
   - `Advisor consulted. Final answer from the first turn.`
 - 用同一 `session_id` 续轮后：
   - Claude 的第 3 个请求会把上一轮 assistant content 中的
@@ -536,7 +536,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - `codex-cli 0.121.0`
 - `claude 2.1.114`
 - `codex exec --json`
-- `claude --bare -p`
+- `claude`
 - 本地 loopback probe
 
 已验证：
@@ -547,7 +547,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
     - `We're currently experiencing high demand, which may cause temporary errors.`
   - 畸形 SSE 与断流都会收敛成：
     - `stream disconnected before completion: stream closed before response.completed`
-- `/v1/messages` -> `claude --bare -p`
+- `/v1/messages` -> `claude`
   - `400` 直接打印：
     - `API Error: 400 {...}`
   - `500` 当前样本表现成内部重试；在一个 `15s` time-bounded clean sample 里，终端没有产生可见错误文本，但服务端观测到 `10` 个 `POST /v1/messages`
@@ -607,25 +607,25 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 
 - `claude 2.1.114`
 - `claude 2.1.116`
-- `claude --bare -p`
-- `claude -p`
-- `claude --bare -p` 首轮 + `-r` 续轮
+- `claude`
+- `claude`
+- `claude` 首轮 + `-r` 续轮
 - 交互 TTY `claude --bare`
 - 默认交互 TTY `claude`
-- `claude -p -c`
-- 默认 `claude -p` 的真实 tool roundtrip
-- `claude -p --verbose --output-format stream-json`
+- `claude --continue`
+- 默认 `claude` 的真实 tool roundtrip
+- `claude`
 - 本地 `/v1/messages` loopback success probe
 
 已验证：
 
-- `claude --bare -p`
+- `claude`
   - 当前样本观测到 `2` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
-- `claude -p`
+- `claude`
   - 当前样本观测到 `1` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
-- `claude --bare -p` 首轮 + `-r` 续轮
+- `claude` 首轮 + `-r` 续轮
   - 当前样本观测到 `3` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
 - 交互 TTY `claude --bare`
@@ -634,13 +634,13 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - 默认交互 TTY `claude`
   - 当前样本观测到 `2` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
-- `claude -p -c`
+- `claude --continue`
   - 当前样本观测到 `2` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
-- 默认 `claude -p` 的真实 tool roundtrip
+- 默认 `claude` 的真实 tool roundtrip
   - 当前样本观测到 `2` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
-- `claude -p --verbose --output-format stream-json`
+- `claude`
   - 不带 `--verbose` 时，CLI 直接报错并退出
   - 带 `--verbose` 的有效调用里，当前样本观测到 `1` 条 `POST /v1/messages`
   - `POST /v1/messages/count_tokens = 0`
@@ -1198,7 +1198,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 
 - 交互 `features.apps=true` 首轮文本路径的 `/responses` 畸形 SSE 与显式断流不再属于未知面
 - 当前这条交互路径里，畸形 SSE 与显式断流当前会收敛到同一类“未完整结束的流”文案
-- 这还不包含更深交互回合、apps 工具回合或 Claude 默认 `-p` 工具路径
+- 这还不包含更深交互回合、apps 工具回合或 Claude 默认交互式工具路径
 
 证据：
 
@@ -1329,12 +1329,12 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 
 - [12-error-compatibility-matrix-v1.md](/Users/norvyn/Code/Projects/ModelBridge/docs/scheme3/12-error-compatibility-matrix-v1.md)
 
-### 3.34 默认 `claude -p` tool-use 回合的 `400 / 500 / 畸形 SSE / 断流` 外观已验证
+### 3.34 默认 `claude` tool-use 回合的 `400 / 500 / 畸形 SSE / 断流` 外观已验证
 
 当前范围：
 
 - `claude 2.1.116`
-- 默认 `claude -p`
+- 默认 `claude`
 - 第 `1` 条 `/v1/messages` 固定返回 `Read` tool_use
 - 第 `2` 条 `/v1/messages` 起按 probe mode 返回错误
 - 本地 `/v1/messages` loopback probe
@@ -1370,7 +1370,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 
 当前含义：
 
-- 默认 `claude -p` tool-use 回合不再属于错误外观未知面
+- 默认 `claude` tool-use 回合不再属于错误外观未知面
 - 当前 `400` 会直接打印完整 API Error JSON
 - 当前 `500` 当前仍表现成内部重试，不能写成“立即返回终端错误”
 - 当前畸形 SSE 与半截 SSE 当前都落到解析失败或内部空值错误，不会显示“断流”字样
@@ -1435,8 +1435,8 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 已验证：
 
 - 本地 daemon 当前真实完成：
-  - `claude --bare -p` 文本回复
-  - 默认 `claude -p` 文本回复
+  - `claude` 文本回复
+  - 默认 `claude` 文本回复
   - `Bash` 工具回合
   - `Read` 工具回合
   - `advisor` server-side tool 回合
@@ -1476,4 +1476,4 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
 - 真实远端主出口接 `https://chatgpt.com/backend-api/codex/responses`
 - 辅助出口按需接 `/backend-api/...`
 
-这条路线已经被证实存在，当前单轮文本路径的最小响应契约已经收敛，函数工具声明层改写已被真实远端接受，代表性函数家族与补充工具家族的工具回合层都已经闭环；`advisor` 侧现在也已补齐三层证据：官方契约、Claude CLI 接受性、`/responses` synthetic bridge 成功样本。HTTP-only、sidecar 非硬依赖，以及交互 `features.apps=true` 首轮、同会话第二轮、同会话第三轮文本路径和默认 `claude -p` tool-use 回合的错误外观都已经扩到当前已测路径；当前四份 `/responses` 首轮请求样本的顶层骨架也已确认一致，非交互 `features.apps=true` 的 `exec/exec resume` 文本路径当前也已确认：在 websocket `404` 下仍可走 HTTP-only，在 sidecar `404/500` 下仍能完成。与此同时，当前真实 GitHub app 业务动作已经补到非交互与交互两条样本：forward-only 对照仍成功，但 sidecar `404/500` 都会失败。当前未决范围收敛到其他 app 工具家族、其他交互 apps 业务动作，以及个别工具实例的更深业务语义。
+这条路线已经被证实存在，当前单轮文本路径的最小响应契约已经收敛，函数工具声明层改写已被真实远端接受，代表性函数家族与补充工具家族的工具回合层都已经闭环；`advisor` 侧现在也已补齐三层证据：官方契约、Claude CLI 接受性、`/responses` synthetic bridge 成功样本。HTTP-only、sidecar 非硬依赖，以及交互 `features.apps=true` 首轮、同会话第二轮、同会话第三轮文本路径和默认 `claude` tool-use 回合的错误外观都已经扩到当前已测路径；当前四份 `/responses` 首轮请求样本的顶层骨架也已确认一致，非交互 `features.apps=true` 的 `exec/exec resume` 文本路径当前也已确认：在 websocket `404` 下仍可走 HTTP-only，在 sidecar `404/500` 下仍能完成。与此同时，当前真实 GitHub app 业务动作已经补到非交互与交互两条样本：forward-only 对照仍成功，但 sidecar `404/500` 都会失败。当前未决范围收敛到其他 app 工具家族、其他交互 apps 业务动作，以及个别工具实例的更深业务语义。

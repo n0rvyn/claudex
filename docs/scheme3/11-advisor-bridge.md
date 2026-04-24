@@ -41,7 +41,7 @@ Anthropic 官方 `Advisor tool` 文档当前已明确：
   - `server_tool_use`
   - `advisor_tool_result`
   - `text`
-- `claude --bare -p` 正常完成，结果是：
+- `claude` 正常完成，结果是：
   - `Advisor consulted. Final answer from the first turn.`
 - 用相同 `session_id` 续轮后，Claude 会在 assistant content 中原样带回：
   - `server_tool_use`
