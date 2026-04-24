@@ -22,9 +22,13 @@ public struct DoctorSnapshot: Codable, Sendable {
     public let chatGPTAuthenticated: Bool
     public let accountIDSuffix: String?
     public let authError: String?
+    public let lastRefresh: Date?
+    public let hasRefreshToken: Bool
+    public let accessTokenPreview: String?
     public let tracePath: String
     public let recentTraceLines: [String]
     public let traceDiagnostics: TraceDiagnostics
+    public let pendingToolTurnsCount: Int
 
     public init(
         host: String,
@@ -48,9 +52,13 @@ public struct DoctorSnapshot: Codable, Sendable {
         chatGPTAuthenticated: Bool,
         accountIDSuffix: String?,
         authError: String?,
+        lastRefresh: Date?,
+        hasRefreshToken: Bool,
+        accessTokenPreview: String?,
         tracePath: String,
         recentTraceLines: [String],
-        traceDiagnostics: TraceDiagnostics
+        traceDiagnostics: TraceDiagnostics,
+        pendingToolTurnsCount: Int
     ) {
         self.host = host
         self.port = port
@@ -73,8 +81,12 @@ public struct DoctorSnapshot: Codable, Sendable {
         self.chatGPTAuthenticated = chatGPTAuthenticated
         self.accountIDSuffix = accountIDSuffix
         self.authError = authError
+        self.lastRefresh = lastRefresh
+        self.hasRefreshToken = hasRefreshToken
+        self.accessTokenPreview = accessTokenPreview
         self.tracePath = tracePath
         self.recentTraceLines = recentTraceLines
         self.traceDiagnostics = traceDiagnostics
+        self.pendingToolTurnsCount = pendingToolTurnsCount
     }
 }

@@ -32,6 +32,9 @@ let package = Package(
         .target(
             name: "CCRouterCore",
             dependencies: ["CZstd"],
+            resources: [
+                .process("Resources"),
+            ],
             linkerSettings: [
                 .unsafeFlags([vendoredZstdArchive]),
             ]
@@ -46,7 +49,10 @@ let package = Package(
         ),
         .testTarget(
             name: "CCRouterCoreTests",
-            dependencies: ["CCRouterCore"]
+            dependencies: ["CCRouterCore"],
+            resources: [
+                .process("Fixtures"),
+            ]
         ),
     ]
 )

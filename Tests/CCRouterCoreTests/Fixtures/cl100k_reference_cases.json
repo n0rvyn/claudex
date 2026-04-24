@@ -1,0 +1,48 @@
+[
+  {
+    "input": "hello",
+    "token_ids": [
+      15339
+    ],
+    "count": 1
+  },
+  {
+    "input": "Run a bash command",
+    "token_ids": [
+      6869,
+      264,
+      28121,
+      3290
+    ],
+    "count": 4
+  },
+  {
+    "input": "{\"additionalProperties\":false,\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"],\"type\":\"object\"}",
+    "token_ids": [
+      5018,
+      36599,
+      8062,
+      794,
+      3934,
+      1359,
+      13495,
+      23118,
+      5749,
+      23118,
+      1337,
+      3332,
+      928,
+      32075,
+      1359,
+      6413,
+      37899,
+      5749,
+      69982,
+      1337,
+      3332,
+      1735,
+      9388
+    ],
+    "count": 23
+  }
+]

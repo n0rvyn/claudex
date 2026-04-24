@@ -91,6 +91,50 @@ struct RouterConfigurationStoreTests {
     }
 
     @Test
+    func saveWithRoutingTablePersistsExpectedRules() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let configPath = tempRoot.appendingPathComponent("config.json").path
+        let store = RouterConfigurationStore(
+            environment: ["CC_ROUTER_CONFIG_PATH": configPath],
+            fileManager: .default,
+            homeDirectoryURL: tempRoot
+        )
+
+        let initial = store.loadOrCreate()
+        let table = ModelRoutingTable(
+            rules: [
+                ModelRoutingRule(
+                    match: "sonnet",
+                    route: ModelRoute(upstreamModel: "gpt-5.4-mini", reasoningEffort: "high", textVerbosity: "medium")
+                ),
+            ],
+            fallback: ModelRoute(upstreamModel: "gpt-5.4", reasoningEffort: "xhigh", textVerbosity: "low")
+        )
+        let updated = RouterConfiguration(
+            host: initial.host, port: initial.port,
+            healthPath: initial.healthPath, messagesPath: initial.messagesPath,
+            countTokensPath: initial.countTokensPath, responsesURL: initial.responsesURL,
+            routingTable: table,
+            advisorRoute: ModelRoute(upstreamModel: "gpt-5.4", reasoningEffort: "xhigh", textVerbosity: "low"),
+            gatewayAuthToken: initial.gatewayAuthToken, gatewayAuthHeader: initial.gatewayAuthHeader,
+            subscriptionAuthFilePath: initial.subscriptionAuthFilePath,
+            subscriptionAuthBookmarkData: nil,
+            configurationPath: initial.configurationPath,
+            configurationWarning: initial.configurationWarning
+        )
+
+        let saved = store.save(configuration: updated)
+        let reloaded = store.loadOrCreate()
+
+        #expect(saved.routingTable.rules.count == 1)
+        #expect(saved.routingTable.rules.first?.match == "sonnet")
+        #expect(reloaded.routingTable.resolve(for: "claude-sonnet-4-6").upstreamModel == "gpt-5.4-mini")
+        #expect(reloaded.advisorRoute.upstreamModel == "gpt-5.4")
+    }
+
+    @Test
     func containerizedHomeDefaultsBackToRealUserAuthPath() throws {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }

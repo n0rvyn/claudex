@@ -3,23 +3,51 @@ import Foundation
 public actor TraceLogger {
     public static let shared = TraceLogger()
 
-    private let fileURL: URL
-    private let timestampKey = "logged_at_unix_ms"
+    /// Task-local override — scoped to current Task tree. Propagates through
+    /// structured concurrency (async/await, async let, TaskGroup) but NOT
+    /// through `Task.detached`. Suitable for per-test isolation.
+    @TaskLocal public static var overrideFileURL: URL?
+
+    private let defaultFileURL: URL
+
+    /// Actor-instance override — persists across Task boundaries including
+    /// `Task.detached`. Set once at daemon startup via `setFileOverride(_:)`;
+    /// reading it from detached connection handlers
+    /// (LocalHTTPServer.swift:216) correctly observes the current value
+    /// via actor serialization.
+    private var instanceOverrideFileURL: URL?
 
     public init(
         fileURL: URL = URL(
             fileURLWithPath: UserHomeResolver.defaultTraceLogFilePath()
         )
     ) {
-        self.fileURL = fileURL
+        self.defaultFileURL = fileURL
     }
+
+    /// Sets the instance-level override. Pass nil to clear.
+    /// Intended for daemon startup (CC_ROUTER_TRACE_PATH) and serialized
+    /// test suites that spawn `Task.detached` (e.g. LocalHTTPServerStreamingErrorTests).
+    public func setFileOverride(_ url: URL?) {
+        self.instanceOverrideFileURL = url
+    }
+
+    private var effectiveFileURL: URL {
+        // TaskLocal wins (test per-test isolation overrides daemon's long-lived setting)
+        if let taskLocal = Self.overrideFileURL { return taskLocal }
+        if let instance = instanceOverrideFileURL { return instance }
+        return defaultFileURL
+    }
+
+    private let timestampKey = "logged_at_unix_ms"
     private let decoder = JSONDecoder()
 
     public var path: String {
-        fileURL.path
+        effectiveFileURL.path
     }
 
     public func log(_ payload: JSONObject) {
+        let fileURL = effectiveFileURL
         let encoder = JSONEncoder()
         var enriched = payload
         if enriched.values[timestampKey] == nil {
@@ -45,11 +73,23 @@ public actor TraceLogger {
 
     public func recentLines(limit: Int) -> [String] {
         guard limit > 0 else { return [] }
+        let fileURL = effectiveFileURL
         guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return [] }
         return text
             .split(separator: "\n", omittingEmptySubsequences: true)
             .suffix(limit)
             .map(String.init)
+    }
+
+    /// Resets the trace log file for testing. Only for use in test targets.
+    public func resetForTesting() {
+        let fileURL = effectiveFileURL
+        try? FileManager.default.removeItem(at: fileURL)
+        try? FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? Data().write(to: fileURL)
     }
 
     public func diagnostics(limit: Int) -> TraceDiagnostics {
@@ -69,6 +109,10 @@ public actor TraceLogger {
         var lastRequestOutcome: String?
         var lastLatencyMilliseconds: Int?
 
+        // Per-Claude-model aggregation state.
+        var claudeModelLookup: [String: String] = [:]   // sessionID -> claude_model
+        var perModelState: [String: (latencies: [Int], success: Int, failure: Int, lastUpstream: String?, errors: [String])] = [:]
+
         for line in lines {
             guard let json = line.data(using: .utf8),
                   let object = try? decoder.decode(JSONObject.self, from: json) else {
@@ -81,8 +125,15 @@ public actor TraceLogger {
 
             let timestamp = object.values[timestampKey]?.intValue
 
-            if object.string("stage") == "anthropic_in", let timestamp {
-                requestTimestamps.append(timestamp)
+            if object.string("stage") == "anthropic_in" {
+                if let timestamp {
+                    requestTimestamps.append(timestamp)
+                }
+                // Record claude_model for this session so anthropic_out can look it up.
+                if let sessionID = object.string("session_id"),
+                   let claudeModel = object.string("claude_model") {
+                    claudeModelLookup[sessionID] = claudeModel
+                }
             }
 
             if let path = object.string("path"), object.string("stage") == "local_auth_reject" {
@@ -100,14 +151,42 @@ public actor TraceLogger {
                     latencies.append(duration)
                     lastLatencyMilliseconds = duration
                 }
+
+                // Per-Claude-model aggregation: look up model from session_id.
+                if let sessionID = object.string("session_id"),
+                   let claudeModel = claudeModelLookup[sessionID] ?? object.string("claude_model") {
+                    var state = perModelState[claudeModel] ?? ([], 0, 0, nil, [])
+                    if let duration = object.values["duration_ms"]?.intValue {
+                        state.latencies.append(duration)
+                    }
+                    if statusCode >= 400 {
+                        state.failure += 1
+                        if let message = object.string("error_message") {
+                            state.errors.append(message)
+                        } else if let errorType = object.string("error_type") {
+                            state.errors.append(errorType)
+                        } else if let outcome {
+                            state.errors.append(outcome)
+                        }
+                    } else {
+                        state.success += 1
+                    }
+                    if let upstream = object.string("upstream_model") {
+                        state.lastUpstream = upstream
+                    }
+                    perModelState[claudeModel] = state
+                }
+
                 if statusCode >= 400 {
                     failureCount += 1
-                    if let message = object.string("error_message") {
-                        recentErrorReasons.append(message)
-                    } else if let errorType = object.string("error_type") {
-                        recentErrorReasons.append(errorType)
-                    } else if let outcome {
-                        recentErrorReasons.append(outcome)
+                    if recentErrorReasons.count < 10 {
+                        if let message = object.string("error_message") {
+                            recentErrorReasons.append(message)
+                        } else if let errorType = object.string("error_type") {
+                            recentErrorReasons.append(errorType)
+                        } else if let outcome {
+                            recentErrorReasons.append(outcome)
+                        }
                     }
                 } else {
                     successCount += 1
@@ -137,6 +216,24 @@ public actor TraceLogger {
 
         let requestsPerMinute = computeRequestsPerMinute(from: requestTimestamps)
 
+        // Build per-Claude-model metrics.
+        let perClaudeMetrics: [String: ClaudeModelMetrics] = Dictionary(uniqueKeysWithValues: perModelState.map { key, state in
+            let sorted = state.latencies.sorted()
+            let p50 = sorted.isEmpty ? nil : sorted[sorted.count / 2]
+            let p95idx = Int((Double(sorted.count - 1) * 0.95).rounded())
+            let p95 = sorted.isEmpty ? nil : sorted[max(0, min(p95idx, sorted.count - 1))]
+            let metrics = ClaudeModelMetrics(
+                requestCount: state.success + state.failure,
+                successCount: state.success,
+                failureCount: state.failure,
+                p50LatencyMilliseconds: p50,
+                p95LatencyMilliseconds: p95,
+                lastUpstreamModel: state.lastUpstream,
+                recentErrorReasons: Array(state.errors.prefix(5))
+            )
+            return (key, metrics)
+        })
+
         return TraceDiagnostics(
             recentStageCounts: stageCounts,
             recentFunctionCallNames: uniquePreservingOrder(functionCallNames),
@@ -150,7 +247,8 @@ public actor TraceLogger {
             lastLatencyMilliseconds: lastLatencyMilliseconds,
             p50LatencyMilliseconds: percentile(latencies, percentile: 0.5),
             p95LatencyMilliseconds: percentile(latencies, percentile: 0.95),
-            recentErrorReasons: uniquePreservingOrder(recentErrorReasons)
+            recentErrorReasons: uniquePreservingOrder(recentErrorReasons),
+            perClaudeModelMetrics: perClaudeMetrics
         )
     }
 

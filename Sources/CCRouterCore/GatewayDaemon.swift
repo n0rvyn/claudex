@@ -49,7 +49,7 @@ public actor GatewayDaemon {
             countTokensPath: configuration.countTokensPath,
             messagesImplemented: true,
             countTokensImplemented: true,
-            countTokensStrategy: "body-size-heuristic",
+            countTokensStrategy: "cl100k-bpe",
             responsesURL: configuration.responsesURL,
             executorModel: configuration.executorModel,
             advisorModel: configuration.advisorModel,
@@ -62,11 +62,18 @@ public actor GatewayDaemon {
             chatGPTAuthenticated: auth.chatGPTAuthenticated,
             accountIDSuffix: auth.accountIDSuffix,
             authError: auth.authError,
+            lastRefresh: auth.lastRefresh,
+            hasRefreshToken: auth.hasRefreshToken,
+            accessTokenPreview: auth.accessTokenPreview,
             tracePath: tracePath,
-            recentTraceLines: recentTraceLines
-            ,
-            traceDiagnostics: traceDiagnostics
+            recentTraceLines: recentTraceLines,
+            traceDiagnostics: traceDiagnostics,
+            pendingToolTurnsCount: await bridge.pendingToolTurnsCount()
         )
+    }
+
+    public func applyRoutingUpdate(table: ModelRoutingTable, advisorRoute: ModelRoute) async {
+        await bridge.updateRouting(table: table, advisorRoute: advisorRoute)
     }
 
     private static func route(
@@ -92,7 +99,7 @@ public actor GatewayDaemon {
                 countTokensPath: configuration.countTokensPath,
                 messagesImplemented: true,
                 countTokensImplemented: true,
-                countTokensStrategy: "body-size-heuristic",
+                countTokensStrategy: "cl100k-bpe",
                 responsesURL: configuration.responsesURL,
                 executorModel: configuration.executorModel,
                 advisorModel: configuration.advisorModel,
@@ -105,9 +112,13 @@ public actor GatewayDaemon {
                 chatGPTAuthenticated: auth.chatGPTAuthenticated,
                 accountIDSuffix: auth.accountIDSuffix,
                 authError: auth.authError,
+                lastRefresh: auth.lastRefresh,
+                hasRefreshToken: auth.hasRefreshToken,
+                accessTokenPreview: auth.accessTokenPreview,
                 tracePath: tracePath,
                 recentTraceLines: recentTraceLines,
-                traceDiagnostics: traceDiagnostics
+                traceDiagnostics: traceDiagnostics,
+                pendingToolTurnsCount: await bridge.pendingToolTurnsCount()
             )
             return try! HTTPResponse.json(value: snapshot)
 
@@ -125,9 +136,7 @@ public actor GatewayDaemon {
                 )
                 return LocalGatewayAuthorization.unauthorizedResponse()
             }
-            let heuristic = max(1, request.body.count / 4)
-            let response = CountTokensResponse(input_tokens: heuristic)
-            return try! HTTPResponse.json(value: response)
+            return await bridge.handleCountTokens(request)
 
         case ("POST", configuration.messagesPath):
             guard LocalGatewayAuthorization.isAuthorized(
@@ -155,10 +164,6 @@ public actor GatewayDaemon {
             )
         }
     }
-}
-
-private struct CountTokensResponse: Codable, Sendable {
-    let input_tokens: Int
 }
 
 private struct ErrorEnvelope: Codable, Sendable {
