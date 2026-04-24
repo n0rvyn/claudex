@@ -397,21 +397,55 @@ private struct UpstreamSettingsTab: View {
                         .textFieldStyle(.roundedBorder)
                         .font(MBFont.mono)
                 }
-                MBField(label: "Executor model") {
-                    TextField("", text: $model.executorModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(MBFont.mono)
-                        .frame(maxWidth: 260)
+            }
+
+            MBSection(title: "Routing rules") {
+                if let error = model.routingSaveError {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(MBColor.faultInk)
                 }
-                MBField(
-                    label: "Advisor model",
-                    help: "Used for the advisor / deep-review paths."
-                ) {
-                    TextField("", text: $model.advisorModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(MBFont.mono)
-                        .frame(maxWidth: 260)
+                MBCard(padding: 0) {
+                    if model.routingRulesDraft.isEmpty {
+                        VStack(spacing: 6) {
+                            Text("No routing rules yet")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(MBColor.inkMid)
+                            Text("Fallback route will match every Claude request. Click \"Add rule\" below to customize per-model routing.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MBColor.inkDim)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 260)
+                        .padding(.horizontal, 16)
+                    } else {
+                        List {
+                            ForEach($model.routingRulesDraft) { $rule in
+                                RoutingRuleDraftRow(
+                                    draft: $rule,
+                                    onDelete: { model.removeRoutingRule(id: rule.id) }
+                                )
+                            }
+                            .onMove { source, destination in
+                                model.moveRoutingRule(from: source, to: destination)
+                            }
+                        }
+                        .listStyle(.plain)
+                        .frame(minHeight: 150, maxHeight: 260)
+                    }
                 }
+                Button(action: { model.addRoutingRule() }) {
+                    Label("Add rule", systemImage: "plus")
+                }
+                .padding(.top, 4)
+            }
+
+            MBSection(title: "Fallback route") {
+                RouteDraftPickers(draft: $model.fallbackRouteDraft)
+            }
+
+            MBSection(title: "Advisor route") {
+                RouteDraftPickers(draft: $model.advisorRouteDraft)
             }
 
             MBSection(title: "Subscription auth") {
@@ -459,17 +493,65 @@ private struct UpstreamSettingsTab: View {
                 }
             }
 
+            MBSection(title: "Token status") {
+                MBField(label: "Access token") {
+                    Text(model.doctorSnapshot?.accessTokenPreview ?? "—")
+                        .font(MBFont.mono)
+                        .foregroundStyle(MBColor.inkMid)
+                        .textSelection(.enabled)
+                }
+                MBField(label: "Last refresh") {
+                    Text(relativeRefreshText(model.doctorSnapshot?.lastRefresh))
+                        .font(.system(size: 12))
+                        .foregroundStyle(MBColor.inkMid)
+                }
+                MBField(label: "State") {
+                    HStack(spacing: 6) {
+                        MBDot(state: tokenDotState, size: 8)
+                        Text(tokenStateText)
+                            .font(.system(size: 12))
+                            .foregroundStyle(MBColor.inkMid)
+                    }
+                }
+                MBField(label: "Refresh") {
+                    HStack(spacing: 8) {
+                        Button(action: { Task { await model.refreshTokenNow() } }) {
+                            Label("Refresh now", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(model.isRefreshingToken)
+                        if model.isRefreshingToken {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                if let error = model.tokenRefreshError {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(MBColor.faultInk)
+                        Button(action: { model.chooseSubscriptionAuthFile() }) {
+                            Label("Re-authorize auth file", systemImage: "key.horizontal")
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+
             HStack(spacing: 8) {
                 Button(action: { model.reloadPersistedConfiguration() }) {
                     Label("Reload config", systemImage: "arrow.clockwise.circle")
                 }
                 Spacer(minLength: 0)
-                Button(action: { model.saveUpstreamSettings() }) {
-                    Label("Save upstream", systemImage: "tray.and.arrow.down")
+                Button(action: { Task { await model.saveRoutingAndApply() } }) {
+                    Label("Save routing + upstream", systemImage: "tray.and.arrow.down")
                 }
                 .buttonStyle(.borderedProminent)
             }
             .padding(.top, 4)
+        }
+        .task {
+            await model.startTokenStatusPolling()
         }
     }
 
@@ -511,6 +593,97 @@ private struct UpstreamSettingsTab: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+        }
+    }
+
+    private var tokenDotState: MBDot.State {
+        if model.isRefreshingToken { return .warn }
+        if model.doctorSnapshot?.hasRefreshToken == true && model.isUpstreamReady { return .live }
+        return model.isUpstreamReady ? .warn : .fault
+    }
+
+    private var tokenStateText: String {
+        if model.isRefreshingToken { return "refreshing…" }
+        if model.doctorSnapshot?.hasRefreshToken == true { return "ready" }
+        if model.isUpstreamReady { return "requires re-auth" }
+        return "auth unavailable"
+    }
+
+    private func relativeRefreshText(_ date: Date?) -> String {
+        guard let date else { return "never" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct RoutingRuleDraftRow: View {
+    @Binding var draft: RoutingRuleDraft
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                TextField("opus", text: $draft.keyword)
+                    .textFieldStyle(.roundedBorder)
+                    .font(MBFont.mono)
+                    .frame(minWidth: 90)
+                Spacer(minLength: 0)
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(MBColor.faultInk)
+                .help("Delete rule")
+                .accessibilityLabel("Delete this routing rule")
+            }
+            RouteDraftPickers(draft: Binding(
+                get: {
+                    RouteDraft(
+                        upstreamModel: draft.upstreamModel,
+                        effort: draft.effort,
+                        verbosity: draft.verbosity
+                    )
+                },
+                set: { route in
+                    draft.upstreamModel = route.upstreamModel
+                    draft.effort = route.effort
+                    draft.verbosity = route.verbosity
+                }
+            ))
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct RouteDraftPickers: View {
+    @Binding var draft: RouteDraft
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Picker("Upstream", selection: $draft.upstreamModel) {
+                ForEach(RoutingOptions.upstreamModels, id: \.self) { value in
+                    Text(value).tag(value)
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 240)
+
+            Picker("Effort", selection: $draft.effort) {
+                ForEach(RoutingOptions.efforts, id: \.self) { value in
+                    Text(value).tag(value)
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 120)
+
+            Picker("Verbosity", selection: $draft.verbosity) {
+                ForEach(RoutingOptions.verbosities, id: \.self) { value in
+                    Text(value).tag(value)
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 120)
         }
     }
 }

@@ -3,6 +3,61 @@ import Combine
 import CCRouterCore
 import SwiftUI
 
+// MARK: - AppModel test-seam dependencies
+
+protocol ConfigurationStoring {
+    func loadOrCreate() -> RouterConfiguration
+    @discardableResult
+    func save(configuration: RouterConfiguration) -> RouterConfiguration
+    func regenerateGatewayToken(from configuration: RouterConfiguration) -> RouterConfiguration
+}
+
+extension RouterConfigurationStore: ConfigurationStoring {}
+
+// MARK: - Routing Insight Row
+
+/// One row in the Dashboard Routing insights section.
+struct RoutingInsightRow: Equatable {
+    let claudeModelKey: String
+    let displayName: String
+    let currentRouteLabel: String
+    let metrics: ClaudeModelMetrics?
+}
+
+struct RoutingRuleDraft: Identifiable, Equatable {
+    let id: UUID
+    var keyword: String
+    var upstreamModel: String
+    var effort: String
+    var verbosity: String
+
+    init(
+        id: UUID = UUID(),
+        keyword: String,
+        upstreamModel: String,
+        effort: String,
+        verbosity: String
+    ) {
+        self.id = id
+        self.keyword = keyword
+        self.upstreamModel = upstreamModel
+        self.effort = effort
+        self.verbosity = verbosity
+    }
+}
+
+struct RouteDraft: Equatable {
+    var upstreamModel: String
+    var effort: String
+    var verbosity: String
+}
+
+enum RoutingOptions {
+    static let upstreamModels = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark"]
+    static let efforts = ["low", "medium", "high", "xhigh"]
+    static let verbosities = ["low", "medium", "high"]
+}
+
 // MARK: - AppModel
 
 @MainActor
@@ -33,6 +88,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var p50LatencyMilliseconds: Int?
     @Published private(set) var p95LatencyMilliseconds: Int?
     @Published private(set) var recentErrorReasons: [String] = []
+    @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var launchAtLoginText = "Launch at login unknown"
     @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var currentConfiguration: RouterConfiguration
@@ -40,25 +96,48 @@ final class AppModel: ObservableObject {
     @Published var gatewayHostDraft: String
     @Published var gatewayPortDraft: String
     @Published var responsesURLDraft: String
-    @Published var executorModelDraft: String
-    @Published var advisorModelDraft: String
     @Published var subscriptionAuthFilePathDraft: String
+    @Published var routingRulesDraft: [RoutingRuleDraft] = []
+    @Published var fallbackRouteDraft: RouteDraft
+    @Published var advisorRouteDraft: RouteDraft
+    @Published var routingSaveError: String?
+    @Published var isRefreshingToken = false
+    @Published var tokenRefreshError: String?
 
-    private let configurationStore = RouterConfigurationStore()
+    private let configurationStore: any ConfigurationStoring
     private let launchAtLoginController = LaunchAtLoginController()
     private var daemon: GatewayDaemon
     private var refreshCancellable: AnyCancellable?
     private var subscriptionAuthBookmarkDataDraft: Data?
+    private let subscriptionRefresherFactory: @Sendable (URL, Data?) -> any SubscriptionSessionProviding
+    private let routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)?
 
-    init() {
-        let configuration = RouterConfigurationStore().loadOrCreate()
+    init(
+        configurationStore: any ConfigurationStoring = RouterConfigurationStore(),
+        subscriptionRefresherFactory: @escaping @Sendable (URL, Data?) -> any SubscriptionSessionProviding = { url, bookmark in
+            SubscriptionSessionLoader(authFileURL: url, securityScopedBookmarkData: bookmark)
+        },
+        routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)? = nil
+    ) {
+        self.configurationStore = configurationStore
+        self.subscriptionRefresherFactory = subscriptionRefresherFactory
+        self.routingUpdateApplier = routingUpdateApplier
+        let configuration = configurationStore.loadOrCreate()
         self.currentConfiguration = configuration
         self.gatewayHostDraft = configuration.host
         self.gatewayPortDraft = String(configuration.port)
         self.responsesURLDraft = configuration.responsesURL
-        self.executorModelDraft = configuration.executorModel
-        self.advisorModelDraft = configuration.advisorModel
         self.subscriptionAuthFilePathDraft = configuration.subscriptionAuthFilePath
+        self.fallbackRouteDraft = RouteDraft(
+            upstreamModel: configuration.routingTable.fallback.upstreamModel,
+            effort: configuration.routingTable.fallback.reasoningEffort,
+            verbosity: configuration.routingTable.fallback.textVerbosity
+        )
+        self.advisorRouteDraft = RouteDraft(
+            upstreamModel: configuration.advisorRoute.upstreamModel,
+            effort: configuration.advisorRoute.reasoningEffort,
+            verbosity: configuration.advisorRoute.textVerbosity
+        )
         self.subscriptionAuthBookmarkDataDraft = configuration.subscriptionAuthBookmarkData
         self.daemon = GatewayDaemon(configuration: configuration)
         applyConfigurationStatus(configuration)
@@ -257,6 +336,27 @@ final class AppModel: ObservableObject {
         return "\(p50) / \(p95)"
     }
 
+    var routingInsights: [RoutingInsightRow] {
+        let modelKeys: [(key: String, display: String)] = [
+            ("opus", "Opus"),
+            ("sonnet", "Sonnet"),
+            ("haiku", "Haiku"),
+        ]
+        let metricsMap = doctorSnapshot?.traceDiagnostics.perClaudeModelMetrics ?? [:]
+        return modelKeys.map { key, display in
+            let resolved = currentConfiguration.routingTable.resolveWithMatch(for: "claude-\(key)-probe")
+            let label = "\(resolved.route.upstreamModel) · \(resolved.route.reasoningEffort)"
+            // Match full model name (e.g. "claude-opus-4-7") containing the keyword.
+            let metrics = metricsMap.first { $0.key.lowercased().contains(key) }?.value
+            return RoutingInsightRow(
+                claudeModelKey: key,
+                displayName: display,
+                currentRouteLabel: label,
+                metrics: metrics
+            )
+        }
+    }
+
     var diagnosticsSummary: String {
         [
             "Daemon: \(daemonState)",
@@ -419,15 +519,15 @@ final class AppModel: ObservableObject {
             host: gatewayHostDraft,
             port: port,
             responsesURL: responsesURLDraft,
-            executorModel: executorModelDraft,
-            advisorModel: advisorModelDraft,
+            executorModel: currentConfiguration.executorModel,
+            advisorModel: currentConfiguration.advisorModel,
             subscriptionAuthFilePath: subscriptionAuthFilePathDraft,
             subscriptionAuthBookmarkData: subscriptionAuthBookmarkDataDraft,
             statusMessage: "Gateway settings saved"
         )
     }
 
-    func saveUpstreamSettings() {
+    func saveLegacyUpstreamSettings() {
         guard let port = Int(gatewayPortDraft), (1...65_535).contains(port) else {
             statusText = "Port must be between 1 and 65535"
             return
@@ -437,12 +537,130 @@ final class AppModel: ObservableObject {
             host: gatewayHostDraft,
             port: port,
             responsesURL: responsesURLDraft,
-            executorModel: executorModelDraft,
-            advisorModel: advisorModelDraft,
+            executorModel: currentConfiguration.executorModel,
+            advisorModel: currentConfiguration.advisorModel,
             subscriptionAuthFilePath: subscriptionAuthFilePathDraft,
             subscriptionAuthBookmarkData: subscriptionAuthBookmarkDataDraft,
             statusMessage: "Upstream settings saved"
         )
+    }
+
+    func addRoutingRule() {
+        routingRulesDraft.append(
+            RoutingRuleDraft(keyword: "", upstreamModel: "gpt-5.4", effort: "xhigh", verbosity: "low")
+        )
+    }
+
+    func removeRoutingRule(id: UUID) {
+        routingRulesDraft.removeAll { $0.id == id }
+    }
+
+    func moveRoutingRule(from source: IndexSet, to destination: Int) {
+        routingRulesDraft.move(fromOffsets: source, toOffset: destination)
+    }
+
+    func saveRoutingAndApply() async {
+        guard let port = Int(gatewayPortDraft), (1...65_535).contains(port) else {
+            routingSaveError = "Port must be between 1 and 65535"
+            statusText = routingSaveError ?? statusText
+            return
+        }
+        guard canPersistDraftAuthPath() else { return }
+
+        let trimmedRules = routingRulesDraft.map { draft in
+            RoutingRuleDraft(
+                id: draft.id,
+                keyword: draft.keyword.trimmingCharacters(in: .whitespacesAndNewlines),
+                upstreamModel: draft.upstreamModel,
+                effort: draft.effort,
+                verbosity: draft.verbosity
+            )
+        }
+        guard trimmedRules.allSatisfy({ !$0.keyword.isEmpty }) else {
+            routingSaveError = "Routing rule keywords cannot be empty"
+            statusText = routingSaveError ?? statusText
+            return
+        }
+
+        routingSaveError = nil
+        let table = ModelRoutingTable(
+            rules: trimmedRules.map { draft in
+                ModelRoutingRule(
+                    match: draft.keyword,
+                    route: ModelRoute(
+                        upstreamModel: draft.upstreamModel,
+                        reasoningEffort: draft.effort,
+                        textVerbosity: draft.verbosity
+                    )
+                )
+            },
+            fallback: ModelRoute(
+                upstreamModel: fallbackRouteDraft.upstreamModel,
+                reasoningEffort: fallbackRouteDraft.effort,
+                textVerbosity: fallbackRouteDraft.verbosity
+            )
+        )
+        let advisor = ModelRoute(
+            upstreamModel: advisorRouteDraft.upstreamModel,
+            reasoningEffort: advisorRouteDraft.effort,
+            textVerbosity: advisorRouteDraft.verbosity
+        )
+
+        let saved = configurationStore.save(
+            configuration: RouterConfiguration(
+                host: gatewayHostDraft,
+                port: port,
+                healthPath: currentConfiguration.healthPath,
+                messagesPath: currentConfiguration.messagesPath,
+                countTokensPath: currentConfiguration.countTokensPath,
+                responsesURL: responsesURLDraft,
+                routingTable: table,
+                advisorRoute: advisor,
+                pendingToolTurnTTLSeconds: currentConfiguration.pendingToolTurnTTLSeconds,
+                advisorContextMessageLimit: currentConfiguration.advisorContextMessageLimit,
+                gatewayAuthToken: currentConfiguration.gatewayAuthToken,
+                gatewayAuthHeader: currentConfiguration.gatewayAuthHeader,
+                subscriptionAuthFilePath: subscriptionAuthFilePathDraft,
+                subscriptionAuthBookmarkData: subscriptionAuthBookmarkDataDraft,
+                configurationPath: currentConfiguration.configurationPath,
+                configurationWarning: currentConfiguration.configurationWarning
+            )
+        )
+        currentConfiguration = saved
+        applyConfigurationStatus(saved)
+        syncDrafts(saved)
+        if let routingUpdateApplier {
+            await routingUpdateApplier(table, advisor)
+        } else {
+            await daemon.applyRoutingUpdate(table: table, advisorRoute: advisor)
+        }
+        await refreshSnapshot(runningText: "Routing and upstream settings saved")
+    }
+
+    func refreshTokenNow() async {
+        guard !isRefreshingToken else { return }
+        isRefreshingToken = true
+        tokenRefreshError = nil
+        defer { isRefreshingToken = false }
+
+        do {
+            let refresher = subscriptionRefresherFactory(
+                URL(fileURLWithPath: currentConfiguration.subscriptionAuthFilePath),
+                currentConfiguration.subscriptionAuthBookmarkData
+            )
+            _ = try await refresher.refreshAndReload()
+            await refreshSnapshot(runningText: "Subscription token refreshed")
+        } catch {
+            tokenRefreshError = error.localizedDescription
+            statusText = "Token refresh failed: \(error.localizedDescription)"
+        }
+    }
+
+    func startTokenStatusPolling() async {
+        while !Task.isCancelled {
+            await refreshSnapshot(runningText: statusText)
+            try? await Task.sleep(for: .seconds(30))
+        }
     }
 
     func regenerateGatewayToken() {
@@ -493,6 +711,23 @@ final class AppModel: ObservableObject {
     ) {
         Task {
             let wasRunning = daemonIsRunning
+            // Update only the fallback upstream model + advisor upstream model from the UI drafts;
+            // preserve existing routing rules so a Settings save does not wipe the defaultTable.
+            let existingTable = currentConfiguration.routingTable
+            let updatedTable = ModelRoutingTable(
+                rules: existingTable.rules,
+                fallback: ModelRoute(
+                    upstreamModel: executorModel,
+                    reasoningEffort: existingTable.fallback.reasoningEffort,
+                    textVerbosity: existingTable.fallback.textVerbosity
+                )
+            )
+            let existingAdvisor = currentConfiguration.advisorRoute
+            let updatedAdvisor = ModelRoute(
+                upstreamModel: advisorModel,
+                reasoningEffort: existingAdvisor.reasoningEffort,
+                textVerbosity: existingAdvisor.textVerbosity
+            )
             let saved = configurationStore.save(
                 configuration: RouterConfiguration(
                     host: host,
@@ -501,8 +736,8 @@ final class AppModel: ObservableObject {
                     messagesPath: currentConfiguration.messagesPath,
                     countTokensPath: currentConfiguration.countTokensPath,
                     responsesURL: responsesURL,
-                    executorModel: executorModel,
-                    advisorModel: advisorModel,
+                    routingTable: updatedTable,
+                    advisorRoute: updatedAdvisor,
                     gatewayAuthToken: currentConfiguration.gatewayAuthToken,
                     gatewayAuthHeader: currentConfiguration.gatewayAuthHeader,
                     subscriptionAuthFilePath: subscriptionAuthFilePath,
@@ -519,6 +754,7 @@ final class AppModel: ObservableObject {
 
     private func persistSubscriptionAuthAuthorization(path: String, bookmarkData: Data) async {
         let wasRunning = daemonIsRunning
+        // Auth-file authorization does not change routing; preserve the existing routingTable + advisorRoute.
         let saved = configurationStore.save(
             configuration: RouterConfiguration(
                 host: currentConfiguration.host,
@@ -527,8 +763,8 @@ final class AppModel: ObservableObject {
                 messagesPath: currentConfiguration.messagesPath,
                 countTokensPath: currentConfiguration.countTokensPath,
                 responsesURL: currentConfiguration.responsesURL,
-                executorModel: currentConfiguration.executorModel,
-                advisorModel: currentConfiguration.advisorModel,
+                routingTable: currentConfiguration.routingTable,
+                advisorRoute: currentConfiguration.advisorRoute,
                 gatewayAuthToken: currentConfiguration.gatewayAuthToken,
                 gatewayAuthHeader: currentConfiguration.gatewayAuthHeader,
                 subscriptionAuthFilePath: path,
@@ -586,6 +822,7 @@ final class AppModel: ObservableObject {
         p50LatencyMilliseconds = snapshot.traceDiagnostics.p50LatencyMilliseconds
         p95LatencyMilliseconds = snapshot.traceDiagnostics.p95LatencyMilliseconds
         recentErrorReasons = snapshot.traceDiagnostics.recentErrorReasons
+        doctorSnapshot = snapshot
         if snapshot.chatGPTAuthenticated {
             authText = "ChatGPT auth ready (\(snapshot.accountIDSuffix ?? "unknown"))"
         } else {
@@ -609,10 +846,31 @@ final class AppModel: ObservableObject {
         gatewayHostDraft = configuration.host
         gatewayPortDraft = String(configuration.port)
         responsesURLDraft = configuration.responsesURL
-        executorModelDraft = configuration.executorModel
-        advisorModelDraft = configuration.advisorModel
         subscriptionAuthFilePathDraft = configuration.subscriptionAuthFilePath
         subscriptionAuthBookmarkDataDraft = configuration.subscriptionAuthBookmarkData
+        syncRoutingDraftsFromConfiguration(configuration)
+    }
+
+    func syncRoutingDraftsFromConfiguration(_ configuration: RouterConfiguration? = nil) {
+        let configuration = configuration ?? currentConfiguration
+        routingRulesDraft = configuration.routingTable.rules.map { rule in
+            RoutingRuleDraft(
+                keyword: rule.match,
+                upstreamModel: rule.route.upstreamModel,
+                effort: rule.route.reasoningEffort,
+                verbosity: rule.route.textVerbosity
+            )
+        }
+        fallbackRouteDraft = RouteDraft(
+            upstreamModel: configuration.routingTable.fallback.upstreamModel,
+            effort: configuration.routingTable.fallback.reasoningEffort,
+            verbosity: configuration.routingTable.fallback.textVerbosity
+        )
+        advisorRouteDraft = RouteDraft(
+            upstreamModel: configuration.advisorRoute.upstreamModel,
+            effort: configuration.advisorRoute.reasoningEffort,
+            verbosity: configuration.advisorRoute.textVerbosity
+        )
     }
 
     private func makeDoctorNotes(configurationWarning: String?) -> [String] {
@@ -721,6 +979,10 @@ struct ContentView: View {
             recentSection
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
+
+            routingInsightsSection
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
                 .padding(.bottom, 10)
 
             footerSection
@@ -940,6 +1202,42 @@ struct ContentView: View {
         }
     }
 
+    private var routingInsightsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            MBSectionHeader(title: "Routing insights")
+                .padding(.horizontal, 4)
+
+            MBCard(padding: 10, background: MBColor.paperDim) {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.routingInsights.enumerated()), id: \.element.claudeModelKey) { index, row in
+                        HStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.displayName)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(MBColor.ink)
+                                Text("→ \(row.currentRouteLabel)")
+                                    .font(MBFont.monoSmall)
+                                    .foregroundStyle(MBColor.inkDim)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Text(routingInsightMetricText(row.metrics))
+                                .font(MBFont.monoSmall)
+                                .foregroundStyle(row.metrics == nil ? MBColor.inkFaint : MBColor.inkMid)
+                                .lineLimit(1)
+                        }
+                        .padding(.vertical, 6)
+                        if index < model.routingInsights.count - 1 {
+                            Rectangle().fill(MBColor.ruleSoft).frame(height: 0.5)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var footerSection: some View {
         HStack(spacing: 6) {
             FooterButton(
@@ -996,6 +1294,12 @@ struct ContentView: View {
     private func percentString(_ value: Double) -> String {
         let bounded = max(0, min(1, value))
         return String(format: "%.0f%%", bounded * 100)
+    }
+
+    private func routingInsightMetricText(_ metrics: ClaudeModelMetrics?) -> String {
+        guard let metrics else { return "—" }
+        let latency = metrics.p50LatencyMilliseconds.map { "\($0) ms" } ?? "—"
+        return "\(metrics.requestCount) req · \(latency)"
     }
 }
 
