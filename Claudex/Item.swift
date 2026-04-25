@@ -8,6 +8,8 @@ final class LaunchAtLoginController {
         self.service = service
     }
 
+    var status: SMAppService.Status { service.status }
+
     var isEnabled: Bool {
         service.status == .enabled
     }

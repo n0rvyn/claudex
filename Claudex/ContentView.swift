@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import CCRouterCore
+import ServiceManagement
 import SwiftUI
 
 // MARK: - AppModel test-seam dependencies
@@ -91,6 +92,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var doctorSnapshot: DoctorSnapshot?
     @Published private(set) var launchAtLoginText = "Launch at login unknown"
     @Published private(set) var launchAtLoginEnabled = false
+    @Published private(set) var launchAtLoginStatus: SMAppService.Status = .notRegistered
     @Published private(set) var currentConfiguration: RouterConfiguration
 
     @Published var gatewayHostDraft: String
@@ -889,6 +891,7 @@ final class AppModel: ObservableObject {
     private func refreshLaunchAtLogin() {
         launchAtLoginEnabled = launchAtLoginController.isEnabled
         launchAtLoginText = launchAtLoginController.statusText
+        launchAtLoginStatus = launchAtLoginController.status
     }
 
     private func canPersistDraftAuthPath() -> Bool {

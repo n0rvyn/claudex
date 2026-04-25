@@ -1,5 +1,6 @@
 import AppKit
 import CCRouterCore
+import ServiceManagement
 import SwiftUI
 
 // MARK: - Settings window (native tabs)
@@ -109,6 +110,9 @@ private struct GeneralSettingsTab: View {
 
     var body: some View {
         SettingsShell {
+            AppInfoCard(model: model)
+                .padding(.bottom, 14)
+
             MBSection(title: "Appearance") {
                 MBField(
                     label: "Theme",
@@ -133,49 +137,100 @@ private struct GeneralSettingsTab: View {
                     .toggleStyle(MBToggleStyle())
                     .labelsHidden()
                 }
-
-                MBField(label: "Status") {
-                    HStack(spacing: 6) {
-                        MBDot(state: model.launchAtLoginEnabled ? .live : .idle, size: 8)
-                        Text(model.launchAtLoginText)
-                            .font(.system(size: 12))
-                            .foregroundStyle(MBColor.inkMid)
-                    }
-                }
+                launchAtLoginStatusView
             }
 
-            MBSection(title: "Data location") {
+            MBSection(title: "Storage") {
                 MBField(
                     label: "Config file",
-                    help: "Edited by the app as you change settings. API keys are stored in plaintext here.",
-                    stacked: true
+                    help: "Edited by the app as you change settings.",
+                    stacked: true,
+                    chipText: "Plaintext",
+                    chipTone: .warn
                 ) {
                     HStack(spacing: 6) {
-                        MBReadOnlyField(value: model.configurationPath)
+                        MBReadOnlyField(value: model.configurationPath, truncateMiddle: true)
                         Button(action: { model.openConfigurationLocation() }) {
                             Label("Reveal", systemImage: "folder")
                         }
+                        Button(action: { copyConfigPath() }) {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
                     }
                 }
 
                 MBField(
-                    label: "Application support folder",
-                    help: "Contains the config file, trace file, and any auxiliary state.",
+                    label: "App data folder",
+                    help: "Trace logs and auxiliary state.",
                     stacked: true
                 ) {
-                    HStack(spacing: 6) {
-                        Button(action: { model.openApplicationSupportDirectory() }) {
-                            Label("Reveal in Finder", systemImage: "folder.badge.gearshape")
-                        }
-                        Button(action: { model.reloadPersistedConfiguration() }) {
-                            Label("Reload config", systemImage: "arrow.clockwise.circle")
-                        }
+                    Button(action: { model.openApplicationSupportDirectory() }) {
+                        Label("Reveal in Finder", systemImage: "folder.badge.gearshape")
                     }
                 }
             }
 
-            AppInfoCard(model: model)
-                .padding(.top, 4)
+            AboutSection(model: model)
+        }
+    }
+
+    @ViewBuilder
+    private var launchAtLoginStatusView: some View {
+        switch model.launchAtLoginStatus {
+        case .notFound:
+            MBBanner(
+                tone: .warn,
+                title: "Launch at login needs the packaged app bundle.",
+                message: "Run \"bash scripts/build_app_bundle.sh\" in the Claudex repo to produce dist/Claudex.app, then move it into /Applications."
+            ) {
+                Button(action: { revealApplicationsFolder() }) {
+                    Label("Open /Applications", systemImage: "app.gift")
+                }
+            }
+            .padding(.top, 4)
+
+        case .requiresApproval:
+            MBBanner(
+                tone: .warn,
+                title: "Login Items needs your approval.",
+                message: "macOS hasn't authorized Claudex to start at login yet."
+            ) {
+                Button(action: { openLoginItemsSettings() }) {
+                    Label("Open Login Items", systemImage: "gear")
+                }
+            }
+            .padding(.top, 4)
+
+        case .enabled:
+            HStack(spacing: 6) {
+                MBDot(state: .live, size: 8)
+                Text("Will start automatically at login.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MBColor.inkMid)
+            }
+            .padding(.top, 6)
+
+        case .notRegistered:
+            EmptyView()
+
+        @unknown default:
+            EmptyView()
+        }
+    }
+
+    private func copyConfigPath() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(model.configurationPath, forType: .string)
+    }
+
+    private func revealApplicationsFolder() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
+    }
+
+    private func openLoginItemsSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+            NSWorkspace.shared.open(url)
         }
     }
 }
@@ -187,22 +242,14 @@ private struct AppInfoCard: View {
         HStack(alignment: .center, spacing: 14) {
             MBBridgeBadge(size: 40, cornerRadius: 9)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Model Bridge \(model.appVersion)")
+                Text("Claudex")
                     .font(MBFont.labelB)
                     .foregroundStyle(MBColor.ink)
-                Text(model.headerStatusText)
+                Text("Local Anthropic ↔ Codex bridge · \(model.appVersion)")
                     .font(.system(size: 11))
                     .foregroundStyle(MBColor.inkDim)
             }
             Spacer(minLength: 0)
-            MBPill(
-                text: model.requiresAuthAttention
-                    ? "Needs auth"
-                    : (model.daemonIsRunning ? "Running" : "Paused"),
-                tone: model.requiresAuthAttention
-                    ? .warn
-                    : (model.daemonIsRunning ? .live : .neutral)
-            )
         }
         .padding(14)
         .background(MBColor.paperDim)
@@ -211,6 +258,67 @@ private struct AppInfoCard: View {
                 .stroke(MBColor.ruleSoft, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+// MARK: - About section
+
+private struct AboutSection: View {
+    @ObservedObject var model: AppModel
+
+    private let privacyURL   = URL(string: "https://prickly-pentagon-3b6.notion.site/Privacy-Policy-34dd945c7a9b814e87b6ea016d49a747")
+    private let termsURL     = URL(string: "https://prickly-pentagon-3b6.notion.site/Terms-of-Use-34dd945c7a9b81acb4b7e1cae6deb37d")
+    private let supportURL   = URL(string: "https://prickly-pentagon-3b6.notion.site/Support-34dd945c7a9b810ba78cc1bce08a6a8e")
+    private let marketingURL = URL(string: "https://prickly-pentagon-3b6.notion.site/Market-Claudex-34dd945c7a9b8193a7bbe8d5b4a439bf")
+
+    var body: some View {
+        MBSection(title: "About") {
+            MBField(label: "Version") {
+                HStack(spacing: 6) {
+                    Text(model.appVersion)
+                        .font(MBFont.mono)
+                        .foregroundStyle(MBColor.inkMid)
+                        .textSelection(.enabled)
+                    Button(action: { copyVersion() }) {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+            MBField(label: "Public pages", help: "Linked from the App Store Connect submission.") {
+                HStack(spacing: 12) {
+                    linkButton(title: "Privacy Policy", url: privacyURL)
+                    linkButton(title: "Terms of Use",   url: termsURL)
+                    linkButton(title: "Support",        url: supportURL)
+                    linkButton(title: "Marketing",      url: marketingURL)
+                }
+            }
+            MBField(label: "Quit") {
+                Button(role: .destructive, action: { NSApplication.shared.terminate(nil) }) {
+                    Label("Quit Claudex", systemImage: "power")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func linkButton(title: String, url: URL?) -> some View {
+        if let url {
+            Button(action: { NSWorkspace.shared.open(url) }) {
+                Label(title, systemImage: "arrow.up.right.square")
+            }
+            .buttonStyle(.link)
+        } else {
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(MBColor.inkFaint)
+                .help("URL not configured")
+        }
+    }
+
+    private func copyVersion() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(model.appVersion, forType: .string)
     }
 }
 

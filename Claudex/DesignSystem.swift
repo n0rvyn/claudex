@@ -174,6 +174,94 @@ struct MBCard<Content: View>: View {
     }
 }
 
+// MARK: - Banner
+
+struct MBBanner<Actions: View>: View {
+    enum Tone { case warn, info, success }
+
+    let tone: Tone
+    let title: String
+    var message: String? = nil
+    @ViewBuilder var actions: Actions
+
+    init(
+        tone: Tone,
+        title: String,
+        message: String? = nil,
+        @ViewBuilder actions: () -> Actions = { EmptyView() }
+    ) {
+        self.tone = tone
+        self.title = title
+        self.message = message
+        self.actions = actions()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: iconName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(accentForeground)
+                .frame(width: 18, alignment: .center)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MBColor.ink)
+                if let message {
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(MBColor.inkMid)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                actions
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(background)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(border, lineWidth: 0.5)
+        )
+    }
+
+    private var iconName: String {
+        switch tone {
+        case .warn:    return "exclamationmark.triangle.fill"
+        case .info:    return "info.circle.fill"
+        case .success: return "checkmark.seal.fill"
+        }
+    }
+
+    private var background: Color {
+        switch tone {
+        case .warn:    return MBColor.warnSoft
+        case .info:    return MBColor.brandSoft
+        case .success: return MBColor.liveSoft
+        }
+    }
+
+    private var border: Color {
+        switch tone {
+        case .warn:    return MBColor.warn.opacity(0.35)
+        case .info:    return MBColor.brand.opacity(0.35)
+        case .success: return MBColor.live.opacity(0.35)
+        }
+    }
+
+    private var accentForeground: Color {
+        switch tone {
+        case .warn:    return MBColor.warnInk
+        case .info:    return MBColor.brand
+        case .success: return MBColor.liveInk
+        }
+    }
+}
+
 // MARK: - Section header
 
 struct MBSectionHeader: View {
@@ -266,14 +354,14 @@ struct MBField<Content: View>: View {
     let label: String
     var help: String? = nil
     var stacked: Bool = false
+    var chipText: String? = nil
+    var chipTone: MBPill.Tone = .neutral
     @ViewBuilder let content: Content
 
     var body: some View {
         if stacked {
             VStack(alignment: .leading, spacing: 6) {
-                Text(label)
-                    .font(MBFont.labelB)
-                    .foregroundStyle(MBColor.ink)
+                labelRow(font: MBFont.labelB)
                 content
                 if let help {
                     Text(help)
@@ -285,9 +373,7 @@ struct MBField<Content: View>: View {
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 18) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(label)
-                        .font(MBFont.label)
-                        .foregroundStyle(MBColor.ink)
+                    labelRow(font: MBFont.label)
                     if let help {
                         Text(help)
                             .font(.system(size: 11))
@@ -307,6 +393,18 @@ struct MBField<Content: View>: View {
                     .frame(height: 0.5)
                     .frame(maxHeight: .infinity, alignment: .bottom)
             )
+        }
+    }
+
+    @ViewBuilder
+    private func labelRow(font: Font) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label)
+                .font(font)
+                .foregroundStyle(MBColor.ink)
+            if let chipText {
+                MBPill(text: chipText, tone: chipTone)
+            }
         }
     }
 }
@@ -342,23 +440,33 @@ struct MBSection<Content: View>: View {
 struct MBReadOnlyField: View {
     let value: String
     var mono: Bool = true
+    var truncateMiddle: Bool = false
 
     var body: some View {
-        Text(value)
-            .font(mono ? MBFont.mono : MBFont.ui)
-            .foregroundStyle(MBColor.ink)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(MBColor.paperAlt)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(MBColor.rule, lineWidth: 0.5)
-            )
+        Group {
+            if truncateMiddle {
+                Text(value)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(value)
+            } else {
+                Text(value)
+            }
+        }
+        .font(mono ? MBFont.mono : MBFont.ui)
+        .foregroundStyle(MBColor.ink)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(MBColor.paperAlt)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(MBColor.rule, lineWidth: 0.5)
+        )
     }
 }
 
@@ -600,9 +708,8 @@ struct MBToggleStyle: ToggleStyle {
     var tint: Color = MBColor.live
 
     func makeBody(configuration: Configuration) -> some View {
-        HStack {
+        HStack(spacing: 8) {
             configuration.label
-            Spacer(minLength: 0)
             ZStack(alignment: configuration.isOn ? .trailing : .leading) {
                 Capsule()
                     .fill(configuration.isOn ? tint : MBColor.rule)
@@ -616,5 +723,6 @@ struct MBToggleStyle: ToggleStyle {
             .animation(.easeInOut(duration: 0.15), value: configuration.isOn)
             .onTapGesture { configuration.isOn.toggle() }
         }
+        .fixedSize()
     }
 }
