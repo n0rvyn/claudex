@@ -966,24 +966,27 @@ struct ContentView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
 
-            if model.requiresAuthAttention {
-                authActionSection
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
+            Group {
+                if model.requiresAuthAttention {
+                    authActionSection
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                }
+                if model.isUpstreamReady {
+                    kpiSection
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                    recentSection
+                        .padding(.horizontal, 12)
+                        .padding(.top, 12)
+                    routingInsightsSection
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                        .padding(.bottom, 10)
+                }
             }
-
-            kpiSection
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-
-            recentSection
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-
-            routingInsightsSection
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 10)
+            .animation(.easeInOut(duration: 0.25), value: model.isUpstreamReady)
+            .animation(.easeInOut(duration: 0.25), value: model.requiresAuthAttention)
 
             footerSection
                 .padding(.horizontal, 12)
@@ -1122,6 +1125,8 @@ struct ContentView: View {
                         Label(model.authResolutionLabel, systemImage: model.authResolutionSystemImage)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(MBColor.brand)
+                    .controlSize(.regular)
                     SettingsLink {
                         Label("Open Settings", systemImage: "gearshape")
                     }
@@ -1240,26 +1245,28 @@ struct ContentView: View {
 
     private var footerSection: some View {
         HStack(spacing: 6) {
-            FooterButton(
-                systemImage: model.primaryActionSystemImage,
-                label: model.primaryActionLabel,
-                action: {
-                    if model.daemonIsRunning {
-                        model.toggleDaemon()
-                    } else if model.isUpstreamReady {
-                        model.toggleDaemon()
-                    } else {
-                        model.chooseSubscriptionAuthFile()
-                    }
-                },
-                isDisabled: model.authState == nil
-            )
-            FooterButton(
-                systemImage: "doc.on.doc",
-                label: "Copy env",
-                action: { model.copyEnvSnippet() },
-                isDisabled: !model.isUpstreamReady
-            )
+            if model.isUpstreamReady {
+                FooterButton(
+                    systemImage: model.primaryActionSystemImage,
+                    label: model.primaryActionLabel,
+                    action: {
+                        if model.daemonIsRunning {
+                            model.toggleDaemon()
+                        } else if model.isUpstreamReady {
+                            model.toggleDaemon()
+                        } else {
+                            model.chooseSubscriptionAuthFile()
+                        }
+                    },
+                    isDisabled: model.authState == nil
+                )
+                FooterButton(
+                    systemImage: "doc.on.doc",
+                    label: "Copy env",
+                    action: { model.copyEnvSnippet() },
+                    isDisabled: !model.isUpstreamReady
+                )
+            }
             Spacer(minLength: 0)
             SettingsLink {
                 FooterButtonLabel(systemImage: "gearshape", label: "Settings")
@@ -1334,6 +1341,8 @@ private struct FooterButtonLabel: View {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
         }
+        .lineLimit(1)
+        .fixedSize()
         .foregroundStyle(MBColor.ink)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
