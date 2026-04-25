@@ -255,3 +255,62 @@
 - `Claudex/ContentView.swift` (T1: `.lineLimit(1)` + `.fixedSize()` on FooterButtonLabel HStack; T2: `.tint(MBColor.brand)` + `.controlSize(.regular)` on auth card Button; T3: Group + dual conditional layout for ContentView.body sections; T4: `if model.isUpstreamReady` wrapper around first two FooterButtons in footerSection)
 
 **Status:** complete
+
+---
+
+## General Settings Redesign
+
+**Plan:** docs/06-plans/2026-04-25-general-settings-redesign-plan.md
+**Status:** complete
+**Tasks:** 6/6 completed, 0 blocked, 0 failed
+
+### Task Results
+
+- Task 1: Expose granular launch-at-login status on AppModel -- PASSED
+  - Added `var status: SMAppService.Status { service.status }` getter to `LaunchAtLoginController` in `Claudex/Item.swift:11`
+  - Added `@Published private(set) var launchAtLoginStatus: SMAppService.Status = .notRegistered` to `AppModel` in `Claudex/ContentView.swift:95`
+  - Added `import ServiceManagement` to `Claudex/ContentView.swift`
+  - Updated `refreshLaunchAtLogin()` to assign `launchAtLoginStatus = launchAtLoginController.status`
+  - Build clean; grep confirms 3 matches for `launchAtLoginStatus` + 1 `import ServiceManagement`
+
+- Task 2: Add MBBanner component to DesignSystem.swift -- PASSED
+  - Appended `struct MBBanner<Actions: View>` with Tone enum (warn/info/success), title, optional body, and actions slot
+  - Palette references (`MBColor.warnSoft`, `.brandSoft`, `.liveSoft`) confirmed present; `.textSelection(.enabled)` on body text per advisory note
+  - Build clean; grep confirms exactly 1 `struct MBBanner`
+
+- Task 3: Add chip slot to MBField and truncateMiddle to MBReadOnlyField -- PASSED
+  - Extended `MBField` with `chipText: String?` and `chipTone: MBPill.Tone` parameters; renders `MBPill` inline via new `labelRow(font:)` helper
+  - Extended `MBReadOnlyField` with `truncateMiddle: Bool`; when true renders `Text` with `.lineLimit(1)`, `.truncationMode(.middle)`, and `.help(value)` tooltip
+  - All existing call sites unchanged (parameters have defaults); grep confirms 4 required matches
+
+- Task 4: Fix MBToggleStyle so toggle hugs its content -- PASSED
+  - Replaced `MBToggleStyle.makeBody`: removed `Spacer(minLength: 0)`, added `HStack(spacing: 8)`, added `.fixedSize()` -- toggle capsule now sits adjacent to its label
+  - Popover call site (`ContentView.swift:1030`) preserved by external `Spacer(minLength: 0)` + `.fixedSize()` scaffold
+  - Build clean; grep confirms `Spacer(minLength: 0)` absent inside `MBToggleStyle` block
+
+- Task 5: Restructure General settings tab -- PASSED
+  - `AppInfoCard` rewritten: hero at top, identity-only (no status pill), subtitle `Local Anthropic ↔ Codex bridge`
+  - `GeneralSettingsTab` rewritten: hero first, Appearance/Startup/Storage sections, `AboutSection` invocation
+  - Startup section: replaced "Status" MBField row with `launchAtLoginStatusView` switch (4 cases: `.notFound` banner, `.requiresApproval` banner, `.enabled` dot row, `.notRegistered` empty)
+  - Storage section: "Config file" with `chipText: "Plaintext"`, `chipTone: .warn`, `truncateMiddle: true`, Copy button; "App data folder" (renamed); "Reload config" button removed
+  - `AboutSection` added with Version+Copy, four Notion link buttons, Quit button
+  - Grep confirms: 5/5 key strings, 4 section titles, 1 "Reload config" match (Upstream tab only), 4 Notion URLs, 2 AboutSection occurrences
+
+### Files Modified (batch 1)
+
+- `Claudex/Item.swift` (T1: `var status` getter added)
+- `Claudex/ContentView.swift` (T1: `import ServiceManagement`, `@Published launchAtLoginStatus`, `refreshLaunchAtLogin` assignment)
+- `Claudex/DesignSystem.swift` (T2: `MBBanner` struct; T3: `MBField` chip params + `MBReadOnlyField` truncateMiddle; T4: `MBToggleStyle` hug-content fix)
+- `Claudex/SettingsView.swift` (T5: `GeneralSettingsTab` rewrite, `AppInfoCard` rewrite, `AboutSection` added)
+- `.claude/execute-plan-state.json` (last_completed: 6)
+
+- Task 6: Add AboutSection with App Store Connect submission links -- PASSED
+  - Appended `private struct AboutSection: View` to `Claudex/SettingsView.swift` after `AppInfoCard` (line 265)
+  - Four real Notion URLs embedded as constants: `privacyURL`, `termsURL`, `supportURL`, `marketingURL` (line 268-271) — all under `https://prickly-pentagon-3b6.notion.site`
+  - Body renders MBSection "About" with: Version row (mono + Copy button), Public pages row (4 link buttons via shared `linkButton(title:url:)` helper using `.buttonStyle(.link)` + system "arrow.up.right.square" icon), Quit row (`.destructive` Button calling `NSApplication.shared.terminate(nil)`)
+  - `linkButton` defensive nil-check renders disabled gray Text when URL fails to parse
+  - `copyVersion()` helper writes `model.appVersion` to NSPasteboard
+  - Sequencing requirement met: Task 5's `GeneralSettingsTab.body` references `AboutSection(model: model)` (line 172); Task 5 + Task 6 applied atomically per plan note
+  - Grep confirms: 0 `<*_URL>` placeholders, 2 `AboutSection` occurrences (struct + call site), 4 Notion URL matches
+
+**Status:** complete (all 6 tasks landed, swift build clean)
