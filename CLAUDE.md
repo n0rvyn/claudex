@@ -12,14 +12,14 @@
 
 ## Project Structure & Module Organization
 
-`ModelBridge` is a macOS menu bar app plus a local gateway runtime. Use the Xcode target in `ModelBridge/` for the shipping app shell (`ModelBridgeApp.swift`, `ContentView.swift`, assets). Keep shared runtime code in `Sources/CCRouterCore/`; this is the bridge that serves `/v1/messages` and forwards to Codex subscription endpoints. CLI helpers live in `Sources/CCRouterDaemon/` and `Sources/CCRouterApp/`. Swift package tests are in `Tests/CCRouterCoreTests/`. Project docs and validated research live under `docs/`, and repeatable workflows live under `scripts/`.
+`Claudex` is a macOS menu bar app plus a local gateway runtime. Use the Xcode target in `Claudex/` for the shipping app shell (`ClaudexApp.swift`, `ContentView.swift`, assets). Keep shared runtime code in `Sources/CCRouterCore/`; this is the bridge that serves `/v1/messages` and forwards to Codex subscription endpoints. CLI helpers live in `Sources/CCRouterDaemon/` and `Sources/CCRouterApp/`. Swift package tests are in `Tests/CCRouterCoreTests/`. Project docs and validated research live under `docs/`, and repeatable workflows live under `scripts/`.
 
 ## Build, Test, and Development Commands
 
-- `swift build --scratch-path /tmp/ModelBridgeSwiftBuild`: build the Swift package products.
-- `swift test --scratch-path /tmp/ModelBridgeSwiftTest`: run Swift Testing suites in `Tests/CCRouterCoreTests`.
-- `xcodebuild test -project ModelBridge.xcodeproj -scheme ModelBridge -destination 'platform=macOS' -only-testing:ModelBridgeTests`: run the Xcode unit-test target.
-- `bash scripts/build_app_bundle.sh`: produce `dist/ModelBridge.app` with ad hoc signing.
+- `swift build --scratch-path /tmp/ClaudexSwiftBuild`: build the Swift package products.
+- `swift test --scratch-path /tmp/ClaudexSwiftTest`: run Swift Testing suites in `Tests/CCRouterCoreTests`.
+- `xcodebuild test -project Claudex.xcodeproj -scheme Claudex -destination 'platform=macOS' -only-testing:ClaudexTests`: run the Xcode unit-test target.
+- `bash scripts/build_app_bundle.sh`: produce `dist/Claudex.app` with ad hoc signing.
 - `bash scripts/smoke_local_gateway.sh`: start the local daemon and verify the real `Claude Code CLI -> ANTHROPIC_BASE_URL` path.
 
 ## Coding Style & Naming Conventions
@@ -36,4 +36,4 @@ This workspace snapshot does not include `.git`, so no local commit history is a
 
 ## Security & Configuration Tips
 
-Do not commit local auth material. The runtime reads subscription state from `~/.codex/auth.json` and local gateway config from `~/Library/Application Support/ModelBridge/config.json` unless overridden by `CC_ROUTER_*`. Use `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` only against the local daemon during development.
+Do not commit local auth material. The runtime reads subscription state from `~/.codex/auth.json` and local gateway config from `~/Library/Application Support/Claudex/config.json` (path derived from `com.90percent.Claudex` bundle ID) unless overridden by `CC_ROUTER_*`. Use `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` only against the local daemon during development.

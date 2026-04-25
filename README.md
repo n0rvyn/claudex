@@ -1,6 +1,6 @@
-# ModelBridge
+# Claudex
 
-ModelBridge is a macOS local gateway that lets `Claude Code CLI` run through `ANTHROPIC_BASE_URL` while the upstream execution path uses the authenticated ChatGPT/Codex subscription on the same machine.
+Claudex is a macOS local gateway that lets `Claude Code CLI` run through `ANTHROPIC_BASE_URL` while the upstream execution path uses the authenticated ChatGPT/Codex subscription on the same machine.
 
 The current verified path is:
 
@@ -13,7 +13,7 @@ The current verified path is:
   - `POST /v1/messages/count_tokens`
   - `GET /health`
 - Reuses the local Codex login state from `~/.codex/auth.json`
-- Persists local gateway configuration in `~/Library/Application Support/ModelBridge/config.json`
+- Persists local gateway configuration in `~/Library/Application Support/Claudex/config.json` (path derived from `com.90percent.Claudex` bundle ID)
 - Ships a menu bar app for daemon control, doctor data, trace review, and Claude env copy
 
 ## Architecture Overview
@@ -34,7 +34,7 @@ If a new Codex or Claude session needs immediate context, start with:
 
 ## Repository Layout
 
-- `ModelBridge/`: active Xcode macOS app target and shipped UI shell
+- `Claudex/`: active Xcode macOS app target and shipped UI shell
 - `Sources/CCRouterCore/`: gateway, auth, trace, and protocol bridge code
 - `Vendor/zstd/`: vendored zstd static archive used to avoid external Homebrew dylib runtime linkage
 - `Sources/CCRouterDaemon/`: local daemon entry point
@@ -67,22 +67,22 @@ bash scripts/smoke_local_gateway.sh
 Start the daemon directly during local debugging:
 
 ```bash
-swift run modelbridge-daemon
+swift run claudex-daemon
 ```
 
 Run the Xcode unit-test path:
 
 ```bash
 xcodebuild test \
-  -project ModelBridge.xcodeproj \
-  -scheme ModelBridge \
+  -project Claudex.xcodeproj \
+  -scheme Claudex \
   -destination 'platform=macOS' \
-  -only-testing:ModelBridgeTests
+  -only-testing:ClaudexTests
 ```
 
 ## Claude Code Setup
 
-ModelBridge is designed to be used through `ANTHROPIC_BASE_URL`.
+Claudex is designed to be used through `ANTHROPIC_BASE_URL`.
 
 Example:
 
@@ -101,7 +101,7 @@ The app can copy the exact env snippet for the current local configuration. Inte
 Primary configuration file:
 
 ```text
-~/Library/Application Support/ModelBridge/config.json
+~/Library/Application Support/Claudex/config.json
 ```
 
 Fallback path when Application Support is unavailable:
@@ -122,7 +122,7 @@ Useful local overrides:
 
 ## Runtime Linking
 
-ModelBridge does not rely on `/usr/local/opt/zstd/lib/libzstd.1.dylib` at launch time.
+Claudex does not rely on `/usr/local/opt/zstd/lib/libzstd.1.dylib` at launch time.
 
 - The repository vendors `libzstd.a` under `Vendor/zstd/lib/`
 - The `CZstd` target exposes the vendored headers from `Sources/CZstd/include/`
@@ -132,7 +132,7 @@ ModelBridge does not rely on `/usr/local/opt/zstd/lib/libzstd.1.dylib` at launch
 
 - `swift build` passes
 - `swift test` passes
-- `scripts/build_app_bundle.sh` builds `dist/ModelBridge.app`
+- `scripts/build_app_bundle.sh` builds `dist/Claudex.app`
 - `scripts/smoke_local_gateway.sh` passes against the real local daemon
 - The local bundle is currently ad hoc signed for local use
 - The active Xcode app exposes a real-time dashboard plus a tabbed Settings window with `General`, `Gateway`, `Claude Code`, `Upstream`, and `Diagnostics`
