@@ -11,3 +11,4 @@ DerivedData/
 __pycache__/
 *.pyc
 *.profraw
+.claude/
