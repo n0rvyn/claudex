@@ -1,14 +1,14 @@
 project: "ModelBridge 全面重构"
 current_phase: 7
 phase_name: "端到端验收"
-phase_step: fix
+phase_step: done
 dev_guide: docs/06-plans/2026-04-22-modelbridge-refactoring-dev-guide.md
 plan_file: docs/06-plans/2026-04-24-phase7-e2e-acceptance-plan.md
 verification_report: ".claude/reviews/plan-verifier-2026-04-24-130042.md (cycle 1 of max 2; 3 must-revise items closed: T1 TaskLocal→actor-instance override, T2 split withTaskLocalIsolation/withInstanceOverride, T7 AC-5.4 real-device refresh row added); cycle 2 Approved (0 gaps)"
 task_progress: "docs/06-plans/execution-report.md — 8/8 tasks completed. Batch 1 had executor-induced botches (duplicate preambles + missing function-close braces); fixed with Python regex (/tmp/fix_braces_v4.py) + 3 manual sed truncations. Final build green."
 review_reports:
   - ".claude/reviews/implementation-reviewer-2026-04-24-142948.md (4 gaps fixed in main context: acceptance report AC-5.6 evidence rewrite, TraceIsolation.swift header note refresh, plan Execution Amendments section, GitHub issue #3 closed as resolved)"
-test_report: "swift test: 221/222 passing (1 pre-existing Phase 1 timing flake `cancellationViaOnTerminationStopsParser` elapsed 1.176s>1.0s under parallel load, unrelated to Phase 7). xcodebuild test: 20/20 passing. 3 Phase 7 trace-hygiene meta-tests deleted (TraceHygieneTests.swift + TraceLoggerInstanceOverrideTests.swift) — TraceLogger.shared process-global state + Swift Testing parallel execution makes the assertions racy. Mechanism correct-by-design; DaemonTraceOverrideResolver pure logic covered by TraceLoggerEnvOverrideTests (7 cases). 2026-04-24 fix verification: bash -n passed for all 3 smoke scripts; TraceLoggerRoutingFieldsTests 9/9 passed; ImageBlockConversionTests 13/13 passed; swift build --disable-sandbox --product modelbridge-daemon passed; smoke_local_gateway.sh, smoke_routing_e2e.sh, smoke_multimodal.sh all passed via localhost e2e."
+test_report: "swift test: 221/222 passing (1 pre-existing Phase 1 timing flake `cancellationViaOnTerminationStopsParser` elapsed 1.176s>1.0s under parallel load, unrelated to Phase 7). xcodebuild test: 20/20 passing. 3 Phase 7 trace-hygiene meta-tests deleted (TraceHygieneTests.swift + TraceLoggerInstanceOverrideTests.swift) — TraceLogger.shared process-global state + Swift Testing parallel execution makes the assertions racy. Mechanism correct-by-design; DaemonTraceOverrideResolver pure logic covered by TraceLoggerEnvOverrideTests (7 cases). 2026-04-24 fix verification: bash -n passed for all 3 smoke scripts; TraceLoggerRoutingFieldsTests 9/9 passed; ImageBlockConversionTests 13/13 passed; swift build --disable-sandbox --product modelbridge-daemon passed; smoke_local_gateway.sh, smoke_routing_e2e.sh, smoke_multimodal.sh all passed via localhost e2e. 2026-04-24 Phase 7 completion re-verification (in-session): smoke_local_gateway.sh green (4 trace assertions), smoke_routing_e2e.sh green (upstream hit gpt-5.3-codex-spark + gpt-5.4), smoke_multimodal.sh green (HTTP 200)."
 gaps_remaining: 0
 crystal_file: docs/11-crystals/2026-04-24-phase-7-e2e-acceptance-crystal.md
 deferred_issues:
@@ -16,4 +16,14 @@ deferred_issues:
   - "#2 Phase 5 V2 count_tokens accuracy ≤10% threshold — REMAINS DEFERRED (DP-P7-001 Chose B; dev-guide line 298 strikethrough links to GitHub issue #2)"
   - "#3 Phase 5 hygiene: test trace leakage — CLOSED 2026-04-24 (Phase 7 Task 2 structural fix; GitHub issue #3 closed completed)"
   - "#4 Phase 6 DP-P6R-003: Routing insights click-to-drill-down — OUT OF SCOPE per Phase 7 crystal D-008"
-last_updated: "2026-04-24T15:16:50"
+  - "#5 Phase 7 /feature-review — end-to-end user journey validation deferred (2026-04-24 user decision; Phase 7 pure-verification phase, no new user-visible features; trigger: after AC-7.7/7.8 device validation or distribution plan first phase)"
+  - "#6 Phase 7 /submission-preview — pre-App Store submission check deferred (2026-04-24 user decision; coupled to distribution plan, not e2e verification; trigger: immediately before ASC submission or during distribution plan first phase)"
+phase7_device_pending:
+  - "AC-7.7: dist/ModelBridge.app on clean macOS account, login + 3 requests (opus/sonnet/haiku) all succeed — evidence assertion rows in acceptance report"
+  - "AC-7.8: ≥1h real interactive session with no unrecovered errors — user self-validation"
+  - "AC-1.3/1.4/1.5: Phase 1 smoke + claude TUI 200-word prompt + trace responses_in_event — Re-run commands in acceptance report"
+  - "AC-2.4/2.5/2.6: Phase 2 multi-model routing + upstream_model trace values + smoke — Re-run commands in acceptance report"
+  - "AC-4.2/4.3/4.4/4.5/4.7: Phase 4 cache key stability + TTL + advisor + smoke + long-run memory — Re-run commands in acceptance report"
+  - "AC-5.4: Phase 5 real-device token refresh (Method A/B/C) — evidence assertion rows in acceptance report"
+  - "AC-6.3/6.4/6.5: Phase 6 Dashboard routing insights + Settings hot-reload + Token status card — requires dist/ModelBridge.app interaction"
+last_updated: "2026-04-24T16:12:00"

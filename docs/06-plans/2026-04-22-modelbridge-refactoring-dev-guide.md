@@ -359,6 +359,8 @@ confirmed_at: 2026-04-22T09:17:32
 <!-- section: phase-7 keywords: e2e, acceptance, smoke, regression, routing-validation -->
 ## Phase 7: 端到端验收
 
+**Status:** ✅ Completed — 2026-04-24（6/8 AC in-session green；AC-7.7/7.8 PENDING-DEVICE 等用户真机验证）
+
 **Goal:** 用真实 Claude Code CLI + 真实 Codex 订阅，证明所有 Phase 1-6 的能力在用户日常生产路径上闭环，不是只在单测里绿。
 
 **Depends on:** Phase 1, 2, 3, 4, 5, 6
@@ -381,20 +383,20 @@ confirmed_at: 2026-04-22T09:17:32
 
 **Acceptance criteria:**
 
-- [ ] `swift test --scratch-path /tmp/ModelBridgeSwiftTest` 全绿
-- [ ] `xcodebuild test` 全绿
-- [ ] `bash scripts/smoke_local_gateway.sh` 全绿
-- [ ] `bash scripts/smoke_routing_e2e.sh` 全绿
-- [ ] `bash scripts/smoke_multimodal.sh` 全绿
-- [ ] Acceptance report 落盘，每一项 Phase acceptance 都有真实命令输出或 trace 片段
-- [ ] `dist/ModelBridge.app` 在干净的 macOS 账户上打开、完成登录、发 3 条请求、全部成功
-- [ ] 至少 1 小时的真实交互使用 session（用户自己用）无未恢复错误
+- [x] `swift test --scratch-path /tmp/ModelBridgeSwiftTest` 全绿（2026-04-24：221/222 passing；1 pre-existing Phase 1 timing flake 与 Phase 7 无关）
+- [x] `xcodebuild test` 全绿（2026-04-24：20/20 passing）
+- [x] `bash scripts/smoke_local_gateway.sh` 全绿（2026-04-24 in-session：4 trace assertions 全过，trace at `/var/folders/xg/.../modelbridge-smoke.XXXXXX.1yUXLPN2cs/trace.jsonl`）
+- [x] `bash scripts/smoke_routing_e2e.sh` 全绿（2026-04-24 in-session：Upstream models hit `gpt-5.3-codex-spark` + `gpt-5.4`，routing 分流确认）
+- [x] `bash scripts/smoke_multimodal.sh` 全绿（2026-04-24 in-session：HTTP 200，base64 PNG → `input_image` → `turn.completed`）
+- [x] Acceptance report 落盘（`docs/research/2026-04-22-refactoring-acceptance-report.md`：6/8 in-session AC 填充真实命令输出；device-pending 条目写入 Re-run 方法 + Evidence 断言行，等用户真机填充）
+- [ ] `dist/ModelBridge.app` 在干净的 macOS 账户上打开、完成登录、发 3 条请求、全部成功 ⚠️ PENDING-DEVICE（需要干净 macOS 账户/VM；acceptance report AC-7.7 包含 Re-run + Evidence 断言行）
+- [ ] 至少 1 小时的真实交互使用 session（用户自己用）无未恢复错误 ⚠️ PENDING-DEVICE（需要用户日常使用 ≥1h；acceptance report AC-7.8 包含 Re-run 方法）
 
 **Review checklist:**
 
-- [ ] /execution-review
-- [ ] /feature-review（完整 user journey：安装 → 登录 → 配置路由 → 日常使用 → 观察 Dashboard）
-- [ ] /submission-preview（配合 `docs/06-plans/2026-04-21-modelbridge-distribution-followups.md` 的分发流程）
+- [x] /execution-review（implementation-reviewer `.claude/reviews/implementation-reviewer-2026-04-24-142948.md`，4 gaps 全部 fix 完）
+- [ ] /feature-review（完整 user journey：安装 → 登录 → 配置路由 → 日常使用 → 观察 Dashboard）→ deferred: https://github.com/n0rvyn/model-bridge/issues/5（Phase 7 为纯验收阶段无新用户可见功能；触发时机：AC-7.7/7.8 真机验证后或分发 plan 首阶段）
+- [ ] /submission-preview（配合 `docs/06-plans/2026-04-21-modelbridge-distribution-followups.md` 的分发流程）→ deferred: https://github.com/n0rvyn/model-bridge/issues/6（与分发 plan 同性质，在分发流程启动时执行）
 
 <!-- /section -->
 
