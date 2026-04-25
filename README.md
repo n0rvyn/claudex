@@ -36,7 +36,7 @@ If a new Codex or Claude session needs immediate context, start with:
 
 - `Claudex/`: active Xcode macOS app target and shipped UI shell
 - `Sources/CCRouterCore/`: gateway, auth, trace, and protocol bridge code
-- `Vendor/zstd/`: vendored zstd static archive used to avoid external Homebrew dylib runtime linkage
+- `Sources/CZstd/`: vendored zstd 1.5.7 source (compress + common) compiled as part of the SwiftPM build
 - `Sources/CCRouterDaemon/`: local daemon entry point
 - `Sources/CCRouterApp/`: legacy SwiftPM utility shell retained for package-local development; not the shipped app path
 - `Tests/CCRouterCoreTests/`: Swift Testing coverage for config, auth, and trace diagnostics
@@ -124,9 +124,9 @@ Useful local overrides:
 
 Claudex does not rely on `/usr/local/opt/zstd/lib/libzstd.1.dylib` at launch time.
 
-- The repository vendors `libzstd.a` under `Vendor/zstd/lib/`
-- The `CZstd` target exposes the vendored headers from `Sources/CZstd/include/`
-- The packaged app and the Xcode Debug app are both verified to launch without a Homebrew zstd dylib dependency
+- The `CZstd` SwiftPM target compiles zstd 1.5.7 from source (`Sources/CZstd/lib/common` + `lib/compress`)
+- Public headers exposed to Swift live at `Sources/CZstd/include/`
+- SwiftPM/Xcode builds zstd per target architecture, so universal (arm64 + x86_64) Archive builds link cleanly without a Homebrew zstd dylib dependency
 
 ## Current Verified State
 

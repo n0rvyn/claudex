@@ -1,10 +1,6 @@
 // swift-tools-version: 6.2
 
 import PackageDescription
-import Foundation
-
-let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-let vendoredZstdArchive = "\(packageRoot)/Vendor/zstd/lib/libzstd.a"
 
 let package = Package(
     name: "Claudex",
@@ -29,16 +25,18 @@ let package = Package(
         .target(
             name: "CZstd",
             path: "Sources/CZstd",
-            publicHeadersPath: "include"
+            sources: ["lib/common", "lib/compress"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("ZSTD_DISABLE_ASM", to: "1"),
+                .define("ZSTD_MULTITHREAD", to: "1"),
+            ]
         ),
         .target(
             name: "CCRouterCore",
             dependencies: ["CZstd"],
             resources: [
                 .process("Resources"),
-            ],
-            linkerSettings: [
-                .unsafeFlags([vendoredZstdArchive]),
             ]
         ),
         .executableTarget(
