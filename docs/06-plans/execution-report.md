@@ -216,3 +216,42 @@
 - `docs/06-plans/2026-04-22-modelbridge-refactoring-dev-guide.md` (Phase 5 AC line updated with issue #2 URL by Task 8)
 
 **Status:** complete (all 8 tasks done)
+
+---
+
+## Dashboard Plan A — Surgical UI Fix (batch 1: tasks 1-5)
+
+**Plan:** docs/06-plans/2026-04-25-dashboard-plan-a-surgical-ui-fix.md
+**Status:** complete
+**Tasks:** 5/5 completed, 0 blocked, 0 failed
+
+### Task Results
+
+- Task 1: Lock footer button label to one line -- PASSED
+  - Added `.lineLimit(1)` and `.fixedSize()` to `FooterButtonLabel.body` root HStack in `Claudex/ContentView.swift`
+  - xcodebuild build SUCCEEDED
+
+- Task 2: Pin auth card primary button to brand color -- PASSED
+  - Added `.tint(MBColor.brand)` and `.controlSize(.regular)` after `.buttonStyle(.borderedProminent)` on the auth file picker button in `authActionSection`
+  - xcodebuild build SUCCEEDED
+
+- Task 3: Replace stacked sections with state-conditional layout -- PASSED
+  - Replaced the unconditional `kpiSection`/`recentSection`/`routingInsightsSection` chain with `Group { if requiresAuthAttention: authActionSection; if isUpstreamReady: kpi+recent+routing }` structure
+  - Both `.animation(.easeInOut(duration: 0.25), value:)` modifiers applied to the Group
+  - xcodebuild build SUCCEEDED
+
+- Task 4: Trim footer when unauthorized -- PASSED
+  - Wrapped `FooterButton` (primary action) and `FooterButton` (Copy env) in `if model.isUpstreamReady { ... }` inside `footerSection`
+  - `SettingsLink` and `Quit` remain unconditional
+  - xcodebuild build SUCCEEDED
+
+- Task 5: Smoke tests -- PASSED
+  - `swift test --scratch-path /tmp/ClaudexSwiftTest`: 232 tests in 31 suites, 2 pre-existing timing issues (`cancellationViaOnTerminationStopsParser`, `firstContentBlockDeltaArrivesWithin50MsOfFirstUpstreamDelta`) -- both documented as environmental flakes in prior phases, not regressions
+  - `xcodebuild test -project Claudex.xcodeproj -scheme Claudex -destination 'platform=macOS' -only-testing:ClaudexTests`: TEST SUCCEEDED (15 test cases across `SettingsRoutingEditorTests` and `SettingsTokenStatusTests`)
+  - `xcodebuild build ... -scheme Claudex`: BUILD SUCCEEDED
+
+### Files Modified
+
+- `Claudex/ContentView.swift` (T1: `.lineLimit(1)` + `.fixedSize()` on FooterButtonLabel HStack; T2: `.tint(MBColor.brand)` + `.controlSize(.regular)` on auth card Button; T3: Group + dual conditional layout for ContentView.body sections; T4: `if model.isUpstreamReady` wrapper around first two FooterButtons in footerSection)
+
+**Status:** complete
