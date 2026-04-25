@@ -123,34 +123,14 @@ public actor GatewayDaemon {
             return try! HTTPResponse.json(value: snapshot)
 
         case ("POST", configuration.countTokensPath):
-            guard LocalGatewayAuthorization.isAuthorized(
-                headers: request.headers,
-                expectedToken: configuration.gatewayAuthToken
-            ) else {
-                await TraceLogger.shared.log(
-                    JSONObject.from([
-                        "stage": .string("local_auth_reject"),
-                        "path": .string(request.path),
-                        "provided_header": .string(LocalGatewayAuthorization.expectedHeader),
-                    ])
-                )
-                return LocalGatewayAuthorization.unauthorizedResponse()
+            if let response = await rejectIfUnauthorized(request: request, configuration: configuration) {
+                return response
             }
             return await bridge.handleCountTokens(request)
 
         case ("POST", configuration.messagesPath):
-            guard LocalGatewayAuthorization.isAuthorized(
-                headers: request.headers,
-                expectedToken: configuration.gatewayAuthToken
-            ) else {
-                await TraceLogger.shared.log(
-                    JSONObject.from([
-                        "stage": .string("local_auth_reject"),
-                        "path": .string(request.path),
-                        "provided_header": .string(LocalGatewayAuthorization.expectedHeader),
-                    ])
-                )
-                return LocalGatewayAuthorization.unauthorizedResponse()
+            if let response = await rejectIfUnauthorized(request: request, configuration: configuration) {
+                return response
             }
             return await bridge.handleMessages(request)
 
@@ -163,6 +143,30 @@ public actor GatewayDaemon {
                 value: error
             )
         }
+    }
+
+    private static func rejectIfUnauthorized(
+        request: HTTPRequest,
+        configuration: RouterConfiguration
+    ) async -> HTTPResponse? {
+        let provided = LocalGatewayAuthorization.providedToken(from: request.headers)
+        guard provided != configuration.gatewayAuthToken else { return nil }
+
+        let providedSuffix = LocalGatewayAuthorization.tokenSuffix(provided)
+        let expectedSuffix = LocalGatewayAuthorization.tokenSuffix(configuration.gatewayAuthToken)
+        await TraceLogger.shared.log(
+            JSONObject.from([
+                "stage": .string("local_auth_reject"),
+                "path": .string(request.path),
+                "provided_header": .string(LocalGatewayAuthorization.expectedHeader),
+                "provided_token_suffix": .string(providedSuffix),
+                "expected_token_suffix": .string(expectedSuffix),
+            ])
+        )
+        return LocalGatewayAuthorization.unauthorizedResponse(
+            providedSuffix: providedSuffix,
+            expectedSuffix: expectedSuffix
+        )
     }
 }
 

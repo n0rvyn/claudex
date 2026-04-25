@@ -23,11 +23,23 @@ enum LocalGatewayAuthorization {
         providedToken(from: headers) == expectedToken
     }
 
-    static func unauthorizedResponse() -> HTTPResponse {
+    /// Returns last-6 of a token for diagnostic logging, or a sentinel describing
+    /// why the value is missing. Never returns the full token.
+    static func tokenSuffix(_ token: String?) -> String {
+        guard let token else { return "<missing>" }
+        if token.isEmpty { return "<empty>" }
+        if token.count <= 6 { return "<short>" }
+        return String(token.suffix(6))
+    }
+
+    static func unauthorizedResponse(
+        providedSuffix: String,
+        expectedSuffix: String
+    ) -> HTTPResponse {
         let envelope = AnthropicErrorEnvelope(
             error: AnthropicErrorBody(
                 type: "authentication_error",
-                message: "Invalid local gateway token. Claude Code must send ANTHROPIC_AUTH_TOKEN through x-api-key."
+                message: "Local gateway token mismatch: client x-api-key suffix \(providedSuffix) does not match gateway token suffix \(expectedSuffix). Update the client's ANTHROPIC_AUTH_TOKEN to the value shown in the Claudex app."
             )
         )
         return try! HTTPResponse.json(
