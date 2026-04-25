@@ -1,8 +1,10 @@
 // swift-tools-version: 6.2
 
 import PackageDescription
+import Foundation
 
-let vendoredZstdArchive = "Vendor/zstd/lib/libzstd.a"
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let vendoredZstdArchive = "\(packageRoot)/Vendor/zstd/lib/libzstd.a"
 
 let package = Package(
     name: "Claudex",
