@@ -32,7 +32,7 @@ public enum UserHomeResolver {
         fallbackHomeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
         fallbackHomeDirectoryURL
-            .appendingPathComponent("Library/Application Support/ModelBridge", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Claudex", isDirectory: true)
     }
 
     public static func defaultTraceLogFilePath(
@@ -48,7 +48,7 @@ public enum UserHomeResolver {
     ) -> String? {
         let fallbackPath = fallbackHomeDirectoryURL.standardizedFileURL.path
         guard isContainerizedHomeDirectoryPath(fallbackPath) else { return nil }
-        return "ModelBridge is running inside App Sandbox. Choose ~/.codex/auth.json in Settings to authorize upstream access."
+        return "Claudex is running inside App Sandbox. Choose ~/.codex/auth.json in Settings to authorize upstream access."
     }
 
     static func shouldReplaceContainerizedAuthPath(_ path: String?) -> Bool {

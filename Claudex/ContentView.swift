@@ -64,7 +64,7 @@ enum RoutingOptions {
 final class AppModel: ObservableObject {
     @Published private(set) var daemonState = "stopped"
     @Published private(set) var endpoint = "http://127.0.0.1:4317"
-    @Published private(set) var statusText = "ModelBridge daemon stopped"
+    @Published private(set) var statusText = "Claudex daemon stopped"
     @Published private(set) var authState: SubscriptionAuthState?
     @Published private(set) var authText = "Auth unknown"
     @Published private(set) var gatewayTokenText = "Token unknown"
@@ -385,7 +385,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await daemon.start()
-                await refreshSnapshot(runningText: "ModelBridge daemon running")
+                await refreshSnapshot(runningText: "Claudex daemon running")
             } catch {
                 statusText = "Failed to start daemon: \(error.localizedDescription)"
             }
@@ -395,7 +395,7 @@ final class AppModel: ObservableObject {
     func stopDaemon() {
         Task {
             await daemon.stop()
-            await refreshSnapshot(runningText: "ModelBridge daemon stopped")
+            await refreshSnapshot(runningText: "Claudex daemon stopped")
         }
     }
 
@@ -417,7 +417,7 @@ final class AppModel: ObservableObject {
             daemon = GatewayDaemon(configuration: currentConfiguration)
             do {
                 try await daemon.start()
-                await refreshSnapshot(runningText: "ModelBridge daemon restarted")
+                await refreshSnapshot(runningText: "Claudex daemon restarted")
             } catch {
                 statusText = "Failed to restart daemon: \(error.localizedDescription)"
             }
@@ -876,7 +876,7 @@ final class AppModel: ObservableObject {
     private func makeDoctorNotes(configurationWarning: String?) -> [String] {
         var notes = [
             "Claude Code uses ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from this app.",
-            "ModelBridge forwards Anthropic Messages to chatgpt.com/backend-api/codex/responses.",
+            "Claudex forwards Anthropic Messages to chatgpt.com/backend-api/codex/responses.",
             "Ingress auth is enforced through x-api-key.",
             "Settings changes restart the daemon automatically when it is already running.",
         ]

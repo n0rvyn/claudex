@@ -162,7 +162,7 @@ public actor ResponsesClient {
         request.setValue("text/event-stream", forHTTPHeaderField: "accept")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("zstd", forHTTPHeaderField: "content-encoding")
-        request.setValue("ModelBridge/0.1", forHTTPHeaderField: "user-agent")
+        request.setValue("Claudex/0.1", forHTTPHeaderField: "user-agent")
 
         return request
     }

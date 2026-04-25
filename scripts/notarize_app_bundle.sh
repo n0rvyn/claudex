@@ -3,9 +3,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_PATH="${MODELBRIDGE_APP_PATH:-$ROOT_DIR/dist/ModelBridge.app}"
-ZIP_PATH="${MODELBRIDGE_ZIP_PATH:-$ROOT_DIR/dist/ModelBridge.zip}"
-NOTARY_PROFILE="${MODELBRIDGE_NOTARY_PROFILE:-}"
+APP_PATH="${CLAUDEX_APP_PATH:-$ROOT_DIR/dist/Claudex.app}"
+ZIP_PATH="${CLAUDEX_ZIP_PATH:-$ROOT_DIR/dist/Claudex.zip}"
+NOTARY_PROFILE="${CLAUDEX_NOTARY_PROFILE:-}"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Missing app bundle at: $APP_PATH"
@@ -13,7 +13,7 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 if [[ -z "$NOTARY_PROFILE" ]]; then
-  echo "Missing MODELBRIDGE_NOTARY_PROFILE"
+  echo "Missing CLAUDEX_NOTARY_PROFILE"
   exit 1
 fi
 

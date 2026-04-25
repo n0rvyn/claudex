@@ -11,13 +11,13 @@ cd "$ROOT_DIR"
 
 export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/clang-module-cache"
 
-DAEMON_BIN="$ROOT_DIR/.build/debug/modelbridge-daemon"
+DAEMON_BIN="$ROOT_DIR/.build/debug/claudex-daemon"
 HOST="${CC_ROUTER_HOST:-127.0.0.1}"
 PORT="${CC_ROUTER_PORT:-4417}"
 HEALTH_URL="http://$HOST:$PORT/health"
-CONFIG_PATH="${CC_ROUTER_CONFIG_PATH:-/tmp/modelbridge-smoke-config.json}"
-GATEWAY_TOKEN="${CC_ROUTER_GATEWAY_TOKEN:-modelbridge-smoke-token}"
-SMOKE_OUTDIR="${SMOKE_OUTDIR:-$(mktemp -d -t modelbridge-smoke.XXXXXX)}"
+CONFIG_PATH="${CC_ROUTER_CONFIG_PATH:-/tmp/claudex-smoke-config.json}"
+GATEWAY_TOKEN="${CC_ROUTER_GATEWAY_TOKEN:-claudex-smoke-token}"
+SMOKE_OUTDIR="${SMOKE_OUTDIR:-$(mktemp -d -t claudex-smoke.XXXXXX)}"
 TRACE_PATH="$SMOKE_OUTDIR/trace.jsonl"
 HEALTH_FILE="$SMOKE_OUTDIR/health.json"
 DAEMON_LOG="$SMOKE_OUTDIR/daemon.log"
@@ -25,7 +25,7 @@ RESULT_FILE="$SMOKE_OUTDIR/result.txt"
 
 echo "smoke outdir: $SMOKE_OUTDIR"
 
-swift build --disable-sandbox --product modelbridge-daemon
+swift build --disable-sandbox --product claudex-daemon
 
 if curl -sS "$HEALTH_URL" > "$HEALTH_FILE" 2>/dev/null; then
   echo "Smoke port $PORT is already in use; set CC_ROUTER_PORT to a free port and rerun."

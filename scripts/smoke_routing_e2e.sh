@@ -9,19 +9,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-DAEMON_BIN="$ROOT_DIR/.build/debug/modelbridge-daemon"
+DAEMON_BIN="$ROOT_DIR/.build/debug/claudex-daemon"
 HOST="${CC_ROUTER_HOST:-127.0.0.1}"
 PORT="${CC_ROUTER_PORT:-4418}"
 HEALTH_URL="http://$HOST:$PORT/health"
-GATEWAY_TOKEN="${CC_ROUTER_GATEWAY_TOKEN:-modelbridge-smoke-token}"
+GATEWAY_TOKEN="${CC_ROUTER_GATEWAY_TOKEN:-claudex-smoke-token}"
 
-SMOKE_OUTDIR="${SMOKE_OUTDIR:-$(mktemp -d -t modelbridge-routing.XXXXXX)}"
+SMOKE_OUTDIR="${SMOKE_OUTDIR:-$(mktemp -d -t claudex-routing.XXXXXX)}"
 TRACE_PATH="$SMOKE_OUTDIR/trace.jsonl"
 CONFIG_PATH="$SMOKE_OUTDIR/config.json"
 
 echo "routing smoke outdir: $SMOKE_OUTDIR"
 
-swift build --disable-sandbox --product modelbridge-daemon
+swift build --disable-sandbox --product claudex-daemon
 
 if curl -sS "$HEALTH_URL" >/dev/null 2>&1; then
   echo "Routing smoke port $PORT is already in use; set CC_ROUTER_PORT to a free port and rerun."

@@ -264,17 +264,17 @@ public struct RouterConfigurationStore {
         }
 
         let primary = homeDirectoryURL
-            .appendingPathComponent("Library/Application Support/ModelBridge", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Claudex", isDirectory: true)
             .appendingPathComponent("config.json")
 
         do {
             try ensureParentDirectory(for: primary)
             return (primary, nil)
         } catch {
-            let fallback = URL(fileURLWithPath: "/tmp/modelbridge/config.json")
+            let fallback = URL(fileURLWithPath: "/tmp/claudex/config.json")
             return (
                 fallback,
-                "Application Support is not writable; using fallback configuration path /tmp/modelbridge/config.json."
+                "Application Support is not writable; using fallback configuration path /tmp/claudex/config.json."
             )
         }
     }

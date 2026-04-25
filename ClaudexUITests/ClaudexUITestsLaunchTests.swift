@@ -1,13 +1,13 @@
 //
-//  ModelBridgeUITestsLaunchTests.swift
-//  ModelBridgeUITests
+//  ClaudexUITestsLaunchTests.swift
+//  ClaudexUITests
 //
 //  Created by Norvyn Zhang on 21/4/2026.
 //
 
 import XCTest
 
-final class ModelBridgeUITestsLaunchTests: XCTestCase {
+final class ClaudexUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

@@ -105,7 +105,7 @@ private struct SettingsShell<Content: View>: View {
 
 private struct GeneralSettingsTab: View {
     @ObservedObject var model: AppModel
-    @AppStorage("mb.appearance") private var appearanceRaw: Int = 0
+    @AppStorage("claudex.appearance") private var appearanceRaw: Int = 0
 
     var body: some View {
         SettingsShell {
@@ -124,7 +124,7 @@ private struct GeneralSettingsTab: View {
             MBSection(title: "Startup") {
                 MBField(
                     label: "Launch at login",
-                    help: "Start ModelBridge and bind the local gateway when you log in."
+                    help: "Start Claudex and bind the local gateway when you log in."
                 ) {
                     Toggle("", isOn: Binding(
                         get: { model.launchAtLoginEnabled },
@@ -381,7 +381,7 @@ private struct UpstreamSettingsTab: View {
             MBSection(title: "Route") {
                 MBField(
                     label: "Destination",
-                    help: "ModelBridge currently routes Anthropic Messages to the subscription-backed responses endpoint.",
+                    help: "Claudex currently routes Anthropic Messages to the subscription-backed responses endpoint.",
                     stacked: true
                 ) {
                     routeVisualization
@@ -724,7 +724,7 @@ private struct DiagnosticsSettingsTab: View {
             MBSection(title: "Trace") {
                 MBField(
                     label: "Log file",
-                    help: "ModelBridge appends one JSON object per line as requests flow through.",
+                    help: "Claudex appends one JSON object per line as requests flow through.",
                     stacked: true
                 ) {
                     HStack(spacing: 6) {

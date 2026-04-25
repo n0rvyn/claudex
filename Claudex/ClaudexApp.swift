@@ -2,9 +2,9 @@ import SwiftUI
 import CCRouterCore
 
 @main
-struct ModelBridgeApp: App {
+struct ClaudexApp: App {
     @StateObject private var model = AppModel()
-    @AppStorage("mb.appearance") private var appearanceRaw: Int = 0
+    @AppStorage("claudex.appearance") private var appearanceRaw: Int = 0
 
     private var preferredColorScheme: ColorScheme? {
         switch appearanceRaw {
@@ -15,7 +15,7 @@ struct ModelBridgeApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("ModelBridge", systemImage: "arrow.triangle.branch") {
+        MenuBarExtra("Claudex", systemImage: "arrow.triangle.branch") {
             ContentView(model: model)
                 .preferredColorScheme(preferredColorScheme)
         }

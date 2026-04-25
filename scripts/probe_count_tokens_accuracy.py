@@ -62,7 +62,7 @@ def upstream_input_tokens(payload: dict, access_token: str, account_id: str) -> 
     req.add_header("accept", "text/event-stream")
     req.add_header("content-type", "application/json")
     req.add_header("content-encoding", "zstd")
-    req.add_header("user-agent", "modelbridge-phase5-v2/accuracy")
+    req.add_header("user-agent", "claudex-phase5-v2/accuracy")
     ctx = ssl.create_default_context()
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=60) as resp:

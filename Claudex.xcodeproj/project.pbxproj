@@ -17,37 +17,37 @@
 			containerPortal = 99E54EE42F975CFA00026D39 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 99E54EEB2F975CFA00026D39;
-			remoteInfo = ModelBridge;
+			remoteInfo = Claudex;
 		};
 		99E54F062F975CFD00026D39 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 99E54EE42F975CFA00026D39 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 99E54EEB2F975CFA00026D39;
-			remoteInfo = ModelBridge;
+			remoteInfo = Claudex;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		99E54EEC2F975CFA00026D39 /* ModelBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ModelBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		99E54EFB2F975CFD00026D39 /* ModelBridgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ModelBridgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		99E54F052F975CFD00026D39 /* ModelBridgeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ModelBridgeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		99E54EEC2F975CFA00026D39 /* Claudex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claudex.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		99E54EFB2F975CFD00026D39 /* ClaudexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaudexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		99E54F052F975CFD00026D39 /* ClaudexUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaudexUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		99E54EEE2F975CFA00026D39 /* ModelBridge */ = {
+		99E54EEE2F975CFA00026D39 /* Claudex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ModelBridge;
+			path = Claudex;
 			sourceTree = "<group>";
 		};
-		99E54EFE2F975CFD00026D39 /* ModelBridgeTests */ = {
+		99E54EFE2F975CFD00026D39 /* ClaudexTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ModelBridgeTests;
+			path = ClaudexTests;
 			sourceTree = "<group>";
 		};
-		99E54F082F975CFD00026D39 /* ModelBridgeUITests */ = {
+		99E54F082F975CFD00026D39 /* ClaudexUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ModelBridgeUITests;
+			path = ClaudexUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,9 +82,9 @@
 		99E54EE32F975CFA00026D39 = {
 			isa = PBXGroup;
 			children = (
-				99E54EEE2F975CFA00026D39 /* ModelBridge */,
-				99E54EFE2F975CFD00026D39 /* ModelBridgeTests */,
-				99E54F082F975CFD00026D39 /* ModelBridgeUITests */,
+				99E54EEE2F975CFA00026D39 /* Claudex */,
+				99E54EFE2F975CFD00026D39 /* ClaudexTests */,
+				99E54F082F975CFD00026D39 /* ClaudexUITests */,
 				99E54EED2F975CFA00026D39 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -92,9 +92,9 @@
 		99E54EED2F975CFA00026D39 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				99E54EEC2F975CFA00026D39 /* ModelBridge.app */,
-				99E54EFB2F975CFD00026D39 /* ModelBridgeTests.xctest */,
-				99E54F052F975CFD00026D39 /* ModelBridgeUITests.xctest */,
+				99E54EEC2F975CFA00026D39 /* Claudex.app */,
+				99E54EFB2F975CFD00026D39 /* ClaudexTests.xctest */,
+				99E54F052F975CFD00026D39 /* ClaudexUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,9 +102,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		99E54EEB2F975CFA00026D39 /* ModelBridge */ = {
+		99E54EEB2F975CFA00026D39 /* Claudex */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 99E54F0F2F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ModelBridge" */;
+			buildConfigurationList = 99E54F0F2F975CFD00026D39 /* Build configuration list for PBXNativeTarget "Claudex" */;
 			buildPhases = (
 				99E54EE82F975CFA00026D39 /* Sources */,
 				99E54EE92F975CFA00026D39 /* Frameworks */,
@@ -115,19 +115,19 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				99E54EEE2F975CFA00026D39 /* ModelBridge */,
+				99E54EEE2F975CFA00026D39 /* Claudex */,
 			);
-			name = ModelBridge;
+			name = Claudex;
 			packageProductDependencies = (
 				14EC70B56F9051C51570B9CA /* CCRouterCore */,
 			);
-			productName = ModelBridge;
-			productReference = 99E54EEC2F975CFA00026D39 /* ModelBridge.app */;
+			productName = Claudex;
+			productReference = 99E54EEC2F975CFA00026D39 /* Claudex.app */;
 			productType = "com.apple.product-type.application";
 		};
-		99E54EFA2F975CFD00026D39 /* ModelBridgeTests */ = {
+		99E54EFA2F975CFD00026D39 /* ClaudexTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 99E54F122F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ModelBridgeTests" */;
+			buildConfigurationList = 99E54F122F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ClaudexTests" */;
 			buildPhases = (
 				99E54EF72F975CFD00026D39 /* Sources */,
 				99E54EF82F975CFD00026D39 /* Frameworks */,
@@ -139,19 +139,19 @@
 				99E54EFD2F975CFD00026D39 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				99E54EFE2F975CFD00026D39 /* ModelBridgeTests */,
+				99E54EFE2F975CFD00026D39 /* ClaudexTests */,
 			);
-			name = ModelBridgeTests;
+			name = ClaudexTests;
 			packageProductDependencies = (
 				C154D7FDEABE1A34D6CF5A7B /* CCRouterCore */,
 			);
-			productName = ModelBridgeTests;
-			productReference = 99E54EFB2F975CFD00026D39 /* ModelBridgeTests.xctest */;
+			productName = ClaudexTests;
+			productReference = 99E54EFB2F975CFD00026D39 /* ClaudexTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		99E54F042F975CFD00026D39 /* ModelBridgeUITests */ = {
+		99E54F042F975CFD00026D39 /* ClaudexUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 99E54F152F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ModelBridgeUITests" */;
+			buildConfigurationList = 99E54F152F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ClaudexUITests" */;
 			buildPhases = (
 				99E54F012F975CFD00026D39 /* Sources */,
 				99E54F022F975CFD00026D39 /* Frameworks */,
@@ -163,11 +163,11 @@
 				99E54F072F975CFD00026D39 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				99E54F082F975CFD00026D39 /* ModelBridgeUITests */,
+				99E54F082F975CFD00026D39 /* ClaudexUITests */,
 			);
-			name = ModelBridgeUITests;
-			productName = ModelBridgeUITests;
-			productReference = 99E54F052F975CFD00026D39 /* ModelBridgeUITests.xctest */;
+			name = ClaudexUITests;
+			productName = ClaudexUITests;
+			productReference = 99E54F052F975CFD00026D39 /* ClaudexUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -193,7 +193,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 99E54EE72F975CFA00026D39 /* Build configuration list for PBXProject "ModelBridge" */;
+			buildConfigurationList = 99E54EE72F975CFA00026D39 /* Build configuration list for PBXProject "Claudex" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -210,9 +210,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				99E54EEB2F975CFA00026D39 /* ModelBridge */,
-				99E54EFA2F975CFD00026D39 /* ModelBridgeTests */,
-				99E54F042F975CFD00026D39 /* ModelBridgeUITests */,
+				99E54EEB2F975CFA00026D39 /* Claudex */,
+				99E54EFA2F975CFD00026D39 /* ClaudexTests */,
+				99E54F042F975CFD00026D39 /* ClaudexUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -268,12 +268,12 @@
 /* Begin PBXTargetDependency section */
 		99E54EFD2F975CFD00026D39 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 99E54EEB2F975CFA00026D39 /* ModelBridge */;
+			target = 99E54EEB2F975CFA00026D39 /* Claudex */;
 			targetProxy = 99E54EFC2F975CFD00026D39 /* PBXContainerItemProxy */;
 		};
 		99E54F072F975CFD00026D39 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 99E54EEB2F975CFA00026D39 /* ModelBridge */;
+			target = 99E54EEB2F975CFA00026D39 /* Claudex */;
 			targetProxy = 99E54F062F975CFD00026D39 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -429,7 +429,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.ModelBridge;
+				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.Claudex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -471,7 +471,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.ModelBridge;
+				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.Claudex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -493,14 +493,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.ModelBridgeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.Claudex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ModelBridge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ModelBridge";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Claudex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Claudex";
 			};
 			name = Debug;
 		};
@@ -514,14 +514,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.ModelBridgeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.Claudex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ModelBridge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ModelBridge";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Claudex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Claudex";
 			};
 			name = Release;
 		};
@@ -533,14 +533,14 @@
 				DEVELOPMENT_TEAM = 2JXYA862GQ;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.ModelBridgeUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.Claudex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = ModelBridge;
+				TEST_TARGET_NAME = Claudex;
 			};
 			name = Debug;
 		};
@@ -552,21 +552,21 @@
 				DEVELOPMENT_TEAM = 2JXYA862GQ;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.ModelBridgeUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.90percent.Claudex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = ModelBridge;
+				TEST_TARGET_NAME = Claudex;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		99E54EE72F975CFA00026D39 /* Build configuration list for PBXProject "ModelBridge" */ = {
+		99E54EE72F975CFA00026D39 /* Build configuration list for PBXProject "Claudex" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				99E54F0D2F975CFD00026D39 /* Debug */,
@@ -575,7 +575,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		99E54F0F2F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ModelBridge" */ = {
+		99E54F0F2F975CFD00026D39 /* Build configuration list for PBXNativeTarget "Claudex" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				99E54F102F975CFD00026D39 /* Debug */,
@@ -584,7 +584,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		99E54F122F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ModelBridgeTests" */ = {
+		99E54F122F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ClaudexTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				99E54F132F975CFD00026D39 /* Debug */,
@@ -593,7 +593,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		99E54F152F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ModelBridgeUITests" */ = {
+		99E54F152F975CFD00026D39 /* Build configuration list for PBXNativeTarget "ClaudexUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				99E54F162F975CFD00026D39 /* Debug */,

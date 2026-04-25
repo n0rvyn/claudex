@@ -5,7 +5,7 @@ import PackageDescription
 let vendoredZstdArchive = "Vendor/zstd/lib/libzstd.a"
 
 let package = Package(
-    name: "ModelBridge",
+    name: "Claudex",
     platforms: [
         .macOS(.v15),
     ],
@@ -15,11 +15,11 @@ let package = Package(
             targets: ["CCRouterCore"]
         ),
         .executable(
-            name: "modelbridge-daemon",
+            name: "claudex-daemon",
             targets: ["CCRouterDaemon"]
         ),
         .executable(
-            name: "modelbridge-app",
+            name: "claudex-app",
             targets: ["CCRouterApp"]
         ),
     ],

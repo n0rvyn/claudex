@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import CCRouterCore
 
-struct ModelBridgeTests {
+struct ClaudexTests {
     @Test
     func configurationStorePersistsGatewayToken() throws {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

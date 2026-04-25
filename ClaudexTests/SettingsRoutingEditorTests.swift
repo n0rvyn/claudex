@@ -1,6 +1,6 @@
 import Foundation
 @testable import CCRouterCore
-@testable import ModelBridge
+@testable import Claudex
 import Testing
 
 @MainActor

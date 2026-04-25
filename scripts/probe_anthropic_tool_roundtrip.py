@@ -310,7 +310,7 @@ def main() -> int:
     parser.add_argument("--tool-name", default="Read")
     parser.add_argument(
         "--tool-input-json",
-        default='{"file_path":"/Users/norvyn/Code/Projects/ModelBridge/docs/scheme3/README.md"}',
+        default='{"file_path":"/Users/norvyn/Code/Projects/Claudex/docs/scheme3/README.md"}',
     )
     parser.add_argument("--final-text", default="TOOL_ROUND_OK")
     parser.add_argument(

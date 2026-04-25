@@ -135,9 +135,9 @@ struct CCRouterApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("ModelBridge", systemImage: "arrow.triangle.branch") {
+        MenuBarExtra("Claudex", systemImage: "arrow.triangle.branch") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("ModelBridge")
+                Text("Claudex")
                     .font(.headline)
 
                 VStack(alignment: .leading, spacing: 6) {

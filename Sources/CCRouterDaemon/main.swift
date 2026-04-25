@@ -24,7 +24,7 @@ struct CCRouterDaemonMain {
         do {
             try await daemon.start()
             let snapshot = await daemon.snapshot()
-            fputs("modelbridge-daemon listening on http://\(snapshot.host):\(snapshot.port)\n", stdout)
+            fputs("claudex-daemon listening on http://\(snapshot.host):\(snapshot.port)\n", stdout)
             fputs("trace path: \(snapshot.tracePath)\n", stdout)
             try await Task.sleep(for: .seconds(86_400))
         } catch {

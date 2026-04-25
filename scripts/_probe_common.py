@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared helpers for ModelBridge Phase 2 probe scripts.
+Shared helpers for Claudex Phase 2 probe scripts.
 
 Provides load_auth(), redact(), and the base minimal_payload() used by
 all three probe scripts (models, reasoning effort, text verbosity).
@@ -97,7 +97,7 @@ def post_probe(
     req.add_header("accept", "text/event-stream")
     req.add_header("content-type", "application/json")
     req.add_header("content-encoding", "zstd")
-    req.add_header("user-agent", "modelbridge-probe/phase2")
+    req.add_header("user-agent", "claudex-probe/phase2")
     try:
         with urllib.request.urlopen(req, context=ssl.create_default_context(), timeout=30) as r:
             raw_body = r.read()
