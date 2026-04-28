@@ -507,53 +507,8 @@ private struct UpstreamSettingsTab: View {
                 }
             }
 
-            MBSection(title: "Routing rules") {
-                if let error = model.routingSaveError {
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(MBColor.faultInk)
-                }
-                MBCard(padding: 0) {
-                    if model.routingRulesDraft.isEmpty {
-                        VStack(spacing: 6) {
-                            Text("No routing rules yet")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(MBColor.inkMid)
-                            Text("Fallback route will match every Claude request. Click \"Add rule\" below to customize per-model routing.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(MBColor.inkDim)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 260)
-                        .padding(.horizontal, 16)
-                    } else {
-                        List {
-                            ForEach($model.routingRulesDraft) { $rule in
-                                RoutingRuleDraftRow(
-                                    draft: $rule,
-                                    onDelete: { model.removeRoutingRule(id: rule.id) }
-                                )
-                            }
-                            .onMove { source, destination in
-                                model.moveRoutingRule(from: source, to: destination)
-                            }
-                        }
-                        .listStyle(.plain)
-                        .frame(minHeight: 150, maxHeight: 260)
-                    }
-                }
-                Button(action: { model.addRoutingRule() }) {
-                    Label("Add rule", systemImage: "plus")
-                }
-                .padding(.top, 4)
-            }
-
-            MBSection(title: "Fallback route") {
-                RouteDraftPickers(draft: $model.fallbackRouteDraft)
-            }
-
-            MBSection(title: "Advisor route") {
-                RouteDraftPickers(draft: $model.advisorRouteDraft)
+            MBSection(title: "Routing policy") {
+                RoutingPolicyEditor(model: model)
             }
 
             MBSection(title: "Subscription auth") {
@@ -727,40 +682,192 @@ private struct UpstreamSettingsTab: View {
 
 private struct RoutingRuleDraftRow: View {
     @Binding var draft: RoutingRuleDraft
+    let index: Int
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
-                TextField("opus", text: $draft.keyword)
-                    .textFieldStyle(.roundedBorder)
-                    .font(MBFont.mono)
-                    .frame(minWidth: 90)
-                Spacer(minLength: 0)
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
+        MBCard(padding: 12, cornerRadius: 9, background: MBColor.paperDim) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("RULE \(index + 1)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(MBColor.inkDim)
+                    MBPill(text: "\(draft.keyword.isEmpty ? "match" : draft.keyword) → \(draft.upstreamModel)", tone: .brand, mono: true)
+                    Spacer(minLength: 0)
+                    Button(action: onMoveUp) {
+                        Image(systemName: "arrow.up")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(canMoveUp ? MBColor.inkMid : MBColor.inkFaint)
+                    .disabled(!canMoveUp)
+                    .help("Move rule up")
+                    .accessibilityLabel("Move routing rule up")
+                    Button(action: onMoveDown) {
+                        Image(systemName: "arrow.down")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(canMoveDown ? MBColor.inkMid : MBColor.inkFaint)
+                    .disabled(!canMoveDown)
+                    .help("Move rule down")
+                    .accessibilityLabel("Move routing rule down")
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MBColor.faultInk)
+                    .help("Delete rule")
+                    .accessibilityLabel("Delete this routing rule")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(MBColor.faultInk)
-                .help("Delete rule")
-                .accessibilityLabel("Delete this routing rule")
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Match keyword")
+                        .font(MBFont.captionB)
+                        .foregroundStyle(MBColor.inkMid)
+                    TextField("opus", text: $draft.keyword)
+                        .textFieldStyle(.roundedBorder)
+                        .font(MBFont.mono)
+                        .frame(maxWidth: 320)
+                }
+
+                RouteDraftPickers(draft: Binding(
+                    get: {
+                        RouteDraft(
+                            upstreamModel: draft.upstreamModel,
+                            effort: draft.effort,
+                            verbosity: draft.verbosity
+                        )
+                    },
+                    set: { route in
+                        draft.upstreamModel = route.upstreamModel
+                        draft.effort = route.effort
+                        draft.verbosity = route.verbosity
+                    }
+                ))
             }
-            RouteDraftPickers(draft: Binding(
-                get: {
-                    RouteDraft(
-                        upstreamModel: draft.upstreamModel,
-                        effort: draft.effort,
-                        verbosity: draft.verbosity
-                    )
-                },
-                set: { route in
-                    draft.upstreamModel = route.upstreamModel
-                    draft.effort = route.effort
-                    draft.verbosity = route.verbosity
-                }
-            ))
         }
-        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct RoutingPolicyEditor: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let error = model.routingSaveError {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MBColor.faultInk)
+            }
+
+            MBCard(padding: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Match rules")
+                                .font(MBFont.labelB)
+                                .foregroundStyle(MBColor.ink)
+                            Text("Rules are checked from top to bottom. The first keyword contained in the Claude model name wins.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MBColor.inkDim)
+                        }
+                        Spacer(minLength: 0)
+                        Button(action: { model.addRoutingRule() }) {
+                            Label("Add rule", systemImage: "plus")
+                        }
+                    }
+
+                    if model.routingRulesDraft.isEmpty {
+                        VStack(spacing: 6) {
+                            Text("No routing rules yet")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(MBColor.inkMid)
+                            Text("Default route will handle every Claude request until a match rule is added.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MBColor.inkDim)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 110)
+                        .padding(.horizontal, 16)
+                        .background(MBColor.paperDim)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(model.routingRulesDraft.indices, id: \.self) { index in
+                                RoutingRuleDraftRow(
+                                    draft: $model.routingRulesDraft[index],
+                                    index: index,
+                                    canMoveUp: index > 0,
+                                    canMoveDown: index < model.routingRulesDraft.count - 1,
+                                    onMoveUp: {
+                                        model.moveRoutingRule(from: IndexSet(integer: index), to: index - 1)
+                                    },
+                                    onMoveDown: {
+                                        model.moveRoutingRule(from: IndexSet(integer: index), to: index + 2)
+                                    },
+                                    onDelete: {
+                                        model.removeRoutingRule(id: model.routingRulesDraft[index].id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    routeDivider
+
+                    RoutePolicyBlock(
+                        title: "Default route",
+                        badge: "FALLBACK",
+                        help: "Used when no match rule catches the Claude model.",
+                        draft: $model.fallbackRouteDraft
+                    )
+
+                    routeDivider
+
+                    RoutePolicyBlock(
+                        title: "Advisor route",
+                        badge: "ADVISOR",
+                        help: "Used only for advisor sub-calls.",
+                        draft: $model.advisorRouteDraft
+                    )
+                }
+            }
+        }
+    }
+
+    private var routeDivider: some View {
+        Rectangle()
+            .fill(MBColor.ruleSoft)
+            .frame(height: 0.5)
+    }
+}
+
+private struct RoutePolicyBlock: View {
+    let title: String
+    let badge: String
+    let help: String
+    @Binding var draft: RouteDraft
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(MBFont.labelB)
+                    .foregroundStyle(MBColor.ink)
+                MBPill(text: badge, tone: .neutral)
+                Spacer(minLength: 0)
+            }
+            Text(help)
+                .font(.system(size: 11))
+                .foregroundStyle(MBColor.inkDim)
+            RouteDraftPickers(draft: $draft)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -769,29 +876,51 @@ private struct RouteDraftPickers: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Picker("Upstream", selection: $draft.upstreamModel) {
-                ForEach(RoutingOptions.upstreamModels, id: \.self) { value in
-                    Text(value).tag(value)
+            RoutePickerColumn(title: "Model") {
+                Picker("Model", selection: $draft.upstreamModel) {
+                    ForEach(RoutingOptions.upstreamModels, id: \.self) { value in
+                        Text(value).tag(value)
+                    }
                 }
+                .labelsHidden()
             }
-            .labelsHidden()
-            .frame(maxWidth: 240)
+            .frame(maxWidth: 250)
 
-            Picker("Effort", selection: $draft.effort) {
-                ForEach(RoutingOptions.efforts, id: \.self) { value in
-                    Text(value).tag(value)
+            RoutePickerColumn(title: "Reasoning") {
+                Picker("Reasoning", selection: $draft.effort) {
+                    ForEach(RoutingOptions.efforts, id: \.self) { value in
+                        Text(value).tag(value)
+                    }
                 }
+                .labelsHidden()
             }
-            .labelsHidden()
-            .frame(maxWidth: 120)
+            .frame(maxWidth: 130)
 
-            Picker("Verbosity", selection: $draft.verbosity) {
-                ForEach(RoutingOptions.verbosities, id: \.self) { value in
-                    Text(value).tag(value)
+            RoutePickerColumn(title: "Verbosity") {
+                Picker("Verbosity", selection: $draft.verbosity) {
+                    ForEach(RoutingOptions.verbosities, id: \.self) { value in
+                        Text(value).tag(value)
+                    }
                 }
+                .labelsHidden()
             }
-            .labelsHidden()
-            .frame(maxWidth: 120)
+            .frame(maxWidth: 130)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct RoutePickerColumn<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(MBFont.captionB)
+                .foregroundStyle(MBColor.inkMid)
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

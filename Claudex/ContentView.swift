@@ -54,7 +54,7 @@ struct RouteDraft: Equatable {
 }
 
 enum RoutingOptions {
-    static let upstreamModels = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark"]
+    static let upstreamModels = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.3-codex", "gpt-5.2"]
     static let efforts = ["low", "medium", "high", "xhigh"]
     static let verbosities = ["low", "medium", "high"]
 }
