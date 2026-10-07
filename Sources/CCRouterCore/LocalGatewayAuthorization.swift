@@ -39,7 +39,7 @@ enum LocalGatewayAuthorization {
         let envelope = AnthropicErrorEnvelope(
             error: AnthropicErrorBody(
                 type: "authentication_error",
-                message: "Local gateway token mismatch: client x-api-key suffix \(providedSuffix) does not match gateway token suffix \(expectedSuffix). Update the client's ANTHROPIC_AUTH_TOKEN to the value shown in the Claudex app."
+                message: "Local gateway authentication failed. Update ANTHROPIC_AUTH_TOKEN to the local gateway token shown in Claudex."
             )
         )
         return try! HTTPResponse.json(

@@ -86,41 +86,7 @@ public actor GatewayDaemon {
             return HTTPResponse(statusCode: 200, reasonPhrase: "OK")
 
         case ("GET", configuration.healthPath):
-            let auth = await bridge.doctorStatus()
-            let tracePath = await TraceLogger.shared.path
-            let recentTraceLines = await TraceLogger.shared.recentLines(limit: 8)
-            let traceDiagnostics = await TraceLogger.shared.diagnostics(limit: 64)
-            let snapshot = DoctorSnapshot(
-                host: configuration.host,
-                port: configuration.port,
-                daemonState: "running",
-                startedAt: Date(),
-                anthropicMessagesPath: configuration.messagesPath,
-                countTokensPath: configuration.countTokensPath,
-                messagesImplemented: true,
-                countTokensImplemented: true,
-                countTokensStrategy: "cl100k-bpe",
-                responsesURL: configuration.responsesURL,
-                executorModel: configuration.executorModel,
-                advisorModel: configuration.advisorModel,
-                gatewayAuthHeader: configuration.gatewayAuthHeader,
-                gatewayAuthTokenSuffix: configuration.gatewayAuthTokenSuffix,
-                configurationPath: configuration.configurationPath,
-                configurationWarning: configuration.configurationWarning,
-                subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
-                authState: auth.authState,
-                chatGPTAuthenticated: auth.chatGPTAuthenticated,
-                accountIDSuffix: auth.accountIDSuffix,
-                authError: auth.authError,
-                lastRefresh: auth.lastRefresh,
-                hasRefreshToken: auth.hasRefreshToken,
-                accessTokenPreview: auth.accessTokenPreview,
-                tracePath: tracePath,
-                recentTraceLines: recentTraceLines,
-                traceDiagnostics: traceDiagnostics,
-                pendingToolTurnsCount: await bridge.pendingToolTurnsCount()
-            )
-            return try! HTTPResponse.json(value: snapshot)
+            return try! HTTPResponse.json(value: ["status": "running", "service": "Claudex"])
 
         case ("POST", configuration.countTokensPath):
             if let response = await rejectIfUnauthorized(request: request, configuration: configuration) {
@@ -152,20 +118,18 @@ public actor GatewayDaemon {
         let provided = LocalGatewayAuthorization.providedToken(from: request.headers)
         guard provided != configuration.gatewayAuthToken else { return nil }
 
-        let providedSuffix = LocalGatewayAuthorization.tokenSuffix(provided)
-        let expectedSuffix = LocalGatewayAuthorization.tokenSuffix(configuration.gatewayAuthToken)
         await TraceLogger.shared.log(
             JSONObject.from([
                 "stage": .string("local_auth_reject"),
                 "path": .string(request.path),
                 "provided_header": .string(LocalGatewayAuthorization.expectedHeader),
-                "provided_token_suffix": .string(providedSuffix),
-                "expected_token_suffix": .string(expectedSuffix),
+                "authenticated": .bool(false),
+                
             ])
         )
         return LocalGatewayAuthorization.unauthorizedResponse(
-            providedSuffix: providedSuffix,
-            expectedSuffix: expectedSuffix
+            providedSuffix: "<redacted>",
+            expectedSuffix: "<redacted>"
         )
     }
 }

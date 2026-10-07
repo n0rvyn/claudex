@@ -188,7 +188,15 @@ public final class LocalHTTPServer {
     public func start() throws {
         guard listener == nil else { return }
 
+        guard configuration.host == "127.0.0.1" || configuration.host == "::1" else {
+            throw NSError(domain: "Claudex.Listener", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Gateway host must be a literal loopback address."])
+        }
         let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(
+            host: NWEndpoint.Host(configuration.host),
+            port: NWEndpoint.Port(integerLiteral: NWEndpoint.Port.IntegerLiteralType(configuration.port))
+        )
         parameters.allowLocalEndpointReuse = true
 
         // Disable Nagle so the first chunk of a streaming response reaches the
