@@ -78,7 +78,7 @@ public struct RouterConfigurationStore {
                 gatewayAuthToken: configuration.gatewayAuthToken,
                 gatewayAuthHeader: configuration.gatewayAuthHeader,
                 subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
-                subscriptionAuthBookmarkData: configuration.subscriptionAuthBookmarkData,
+                subscriptionAuthBookmarkData: nil,
                 pendingToolTurnTTLSeconds: configuration.pendingToolTurnTTLSeconds,
                 advisorContextMessageLimit: configuration.advisorContextMessageLimit
             )
@@ -111,7 +111,7 @@ public struct RouterConfigurationStore {
                 gatewayAuthToken: makeGatewayToken(),
                 gatewayAuthHeader: configuration.gatewayAuthHeader,
                 subscriptionAuthFilePath: configuration.subscriptionAuthFilePath,
-                subscriptionAuthBookmarkData: configuration.subscriptionAuthBookmarkData,
+                subscriptionAuthBookmarkData: nil,
                 configurationPath: configuration.configurationPath,
                 configurationWarning: configuration.configurationWarning
             )
@@ -164,15 +164,15 @@ public struct RouterConfigurationStore {
             healthPath: stored.healthPath ?? "/health",
             messagesPath: stored.messagesPath ?? "/v1/messages",
             countTokensPath: stored.countTokensPath ?? "/v1/messages/count_tokens",
-            responsesURL: environment["CC_ROUTER_RESPONSES_URL"] ?? stored.responsesURL ?? "https://chatgpt.com/backend-api/codex/responses",
+            responsesURL: "https://api.openai.com/v1/responses",
             routingTable: routingTable,
             advisorRoute: advisorRoute,
             pendingToolTurnTTLSeconds: stored.pendingToolTurnTTLSeconds ?? 1800,
             advisorContextMessageLimit: stored.advisorContextMessageLimit ?? 8,
             gatewayAuthToken: environment["CC_ROUTER_GATEWAY_TOKEN"] ?? stored.gatewayAuthToken ?? makeGatewayToken(),
             gatewayAuthHeader: stored.gatewayAuthHeader ?? "x-api-key",
-            subscriptionAuthFilePath: resolvedSubscriptionAuthFilePath(storedPath: stored.subscriptionAuthFilePath),
-            subscriptionAuthBookmarkData: stored.subscriptionAuthBookmarkData,
+            subscriptionAuthFilePath: SIWCStore.defaultDirectory.path,
+            subscriptionAuthBookmarkData: nil,
             configurationPath: storageURL.path,
             configurationWarning: warnings.isEmpty ? nil : warnings
         )
@@ -225,15 +225,15 @@ public struct RouterConfigurationStore {
             healthPath: configuration.healthPath ?? "/health",
             messagesPath: configuration.messagesPath ?? "/v1/messages",
             countTokensPath: configuration.countTokensPath ?? "/v1/messages/count_tokens",
-            responsesURL: configuration.responsesURL ?? environment["CC_ROUTER_RESPONSES_URL"] ?? "https://chatgpt.com/backend-api/codex/responses",
+            responsesURL: "https://api.openai.com/v1/responses",
             routingTable: routingTable,
             advisorRoute: advisorRoute,
             executorModel: nil,   // strip legacy keys on write
             advisorModel: nil,
             gatewayAuthToken: configuration.gatewayAuthToken ?? environment["CC_ROUTER_GATEWAY_TOKEN"] ?? makeGatewayToken(),
             gatewayAuthHeader: configuration.gatewayAuthHeader ?? "x-api-key",
-            subscriptionAuthFilePath: resolvedSubscriptionAuthFilePath(storedPath: configuration.subscriptionAuthFilePath),
-            subscriptionAuthBookmarkData: configuration.subscriptionAuthBookmarkData,
+            subscriptionAuthFilePath: SIWCStore.defaultDirectory.path,
+            subscriptionAuthBookmarkData: nil,
             pendingToolTurnTTLSeconds: configuration.pendingToolTurnTTLSeconds,
             advisorContextMessageLimit: configuration.advisorContextMessageLimit
         )

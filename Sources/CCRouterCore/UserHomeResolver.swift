@@ -24,7 +24,7 @@ public enum UserHomeResolver {
         fallbackHomeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> String {
         effectiveHomeDirectoryURL(fallbackHomeDirectoryURL: fallbackHomeDirectoryURL)
-            .appendingPathComponent(".codex/auth.json")
+            .appendingPathComponent("Library/Application Support/Claudex/SIWC/accounts.json")
             .path
     }
 
@@ -48,7 +48,7 @@ public enum UserHomeResolver {
     ) -> String? {
         let fallbackPath = fallbackHomeDirectoryURL.standardizedFileURL.path
         guard isContainerizedHomeDirectoryPath(fallbackPath) else { return nil }
-        return "Claudex is running inside App Sandbox. Choose ~/.codex/auth.json in Settings to authorize upstream access."
+        return "Claudex uses app-owned Sign in with ChatGPT authorization in Settings."
     }
 
     static func shouldReplaceContainerizedAuthPath(_ path: String?) -> Bool {

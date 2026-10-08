@@ -117,7 +117,7 @@ final class AppModel: ObservableObject {
     init(
         configurationStore: any ConfigurationStoring = RouterConfigurationStore(),
         subscriptionRefresherFactory: @escaping @Sendable (URL, Data?) -> any SubscriptionSessionProviding = { url, bookmark in
-            SubscriptionSessionLoader(authFileURL: url, securityScopedBookmarkData: bookmark)
+            SIWCAuth.shared
         },
         routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)? = nil
     ) {
@@ -212,7 +212,7 @@ final class AppModel: ObservableObject {
         case .none:
             return "Checking"
         default:
-            return "Choose auth file"
+            return "Continue with ChatGPT"
         }
     }
 
@@ -253,7 +253,7 @@ final class AppModel: ObservableObject {
     }
 
     var authInstructionText: String {
-        "Click Authorize, then choose ~/.codex/auth.json from your home folder."
+        "Continue with ChatGPT to authorize Claudex. Existing Codex credentials are not imported."
     }
 
     var headerDotState: MBDot.State {
@@ -467,42 +467,71 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func chooseSubscriptionAuthFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.resolvesAliases = true
-        let suggestedURL = URL(
-            fileURLWithPath: UserHomeResolver.defaultSubscriptionAuthFilePath()
-        )
-        panel.directoryURL = suggestedURL.deletingLastPathComponent()
-        panel.nameFieldStringValue = suggestedURL.lastPathComponent
+    @Published var availableChatGPTModels: [SIWCModelSummary] = []
+    @Published var modelCatalogError: String?
+    @Published var isLoadingModelCatalog = false
+    @Published var chatGPTAccounts: [SIWCAccountSummary] = []
+    @Published var signInError: String?
+    @Published var isSigningIn = false
+    private let chatGPTSignIn = SIWCSignIn()
 
-        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
-        statusText = "Validating auth file authorization"
+    func beginChatGPTSignIn(accountID: String? = nil) {
+        isSigningIn = true; signInError = nil
+        chatGPTSignIn.onCompletion = { [weak self] result in
+            guard let self else { return }
+            self.isSigningIn = false
+            if case .failure(let error) = result { self.signInError = error.localizedDescription }
+            Task { await self.loadChatGPTAccounts(); self.refresh() }
+        }
         Task {
             do {
-                let bookmarkData = try selectedURL.bookmarkData(
-                    options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil
-                )
-                _ = try await SubscriptionSessionLoader(
-                    authFileURL: selectedURL,
-                    securityScopedBookmarkData: bookmarkData
-                ).loadCurrent()
-                subscriptionAuthFilePathDraft = selectedURL.path
-                subscriptionAuthBookmarkDataDraft = bookmarkData
-                await persistSubscriptionAuthAuthorization(
-                    path: selectedURL.path,
-                    bookmarkData: bookmarkData
-                )
+                let url = try await chatGPTSignIn.start(accountID: accountID)
+                guard NSWorkspace.shared.open(url) else { throw SIWCError.remote("browser_unavailable") }
             } catch {
-                statusText = "Auth file authorization failed: \(error.localizedDescription)"
-                syncDrafts(currentConfiguration)
-                await refreshSnapshot(runningText: statusText)
+                await chatGPTSignIn.cancel(); isSigningIn = false; signInError = error.localizedDescription
             }
+        }
+    }
+    func cancelChatGPTSignIn() {
+        Task { await chatGPTSignIn.cancel(); isSigningIn = false }
+    }
+    func loadChatGPTModelCatalog() async {
+        guard !isLoadingModelCatalog else { return }
+        isLoadingModelCatalog = true
+        defer { isLoadingModelCatalog = false }
+        let expectedAccount = chatGPTAccounts.first(where: { $0.active })?.id
+        do {
+            let models = try await SIWCAuth.shared.availableModels()
+            await loadChatGPTAccounts()
+            guard chatGPTAccounts.first(where: { $0.active })?.id == expectedAccount,
+                  models.allSatisfy({ $0.accountID == expectedAccount }) else { return }
+            availableChatGPTModels = models; modelCatalogError = nil
+        }
+        catch { modelCatalogError = error.localizedDescription }
+    }
+    func loadChatGPTAccounts() async {
+        do {
+            let previous = chatGPTAccounts.first(where: { $0.active })?.id
+            chatGPTAccounts = try await SIWCAuth.shared.accounts()
+            if previous != chatGPTAccounts.first(where: { $0.active })?.id {
+                availableChatGPTModels = []; modelCatalogError = nil
+            }
+        }
+        catch { signInError = error.localizedDescription }
+    }
+    func selectChatGPTAccount(_ id: String) {
+        Task {
+            do { try await SIWCAuth.shared.select(id); await loadChatGPTAccounts(); refresh() }
+            catch { signInError = error.localizedDescription }
+        }
+    }
+    func signOutChatGPT(_ id: String) {
+        Task {
+            do {
+                let revoked = try await SIWCAuth.shared.signOut(id)
+                signInError = revoked ? nil : "Signed out locally. Remote revocation was not confirmed; disconnect Claudex in ChatGPT Settings."
+                await loadChatGPTAccounts(); refresh()
+            } catch { signInError = error.localizedDescription }
         }
     }
 
@@ -878,7 +907,7 @@ final class AppModel: ObservableObject {
     private func makeDoctorNotes(configurationWarning: String?) -> [String] {
         var notes = [
             "Claude Code uses ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN from this app.",
-            "Claudex forwards Anthropic Messages to chatgpt.com/backend-api/codex/responses.",
+            "Claudex forwards Anthropic Messages to api.openai.com/v1/responses.",
             "Ingress auth is enforced through x-api-key.",
             "Settings changes restart the daemon automatically when it is already running.",
         ]
@@ -916,7 +945,7 @@ final class AppModel: ObservableObject {
              .authFileMissing, .authFileUnreadable, .authFileInvalid,
              .missingAccessToken, .missingAccountID:
             statusText = "Fix upstream auth before \(action)"
-            chooseSubscriptionAuthFile()
+            beginChatGPTSignIn()
         case .unknownFailure:
             statusText = "Resolve upstream auth failure before \(action)"
             refresh()
@@ -1124,7 +1153,7 @@ struct ContentView: View {
                     .foregroundStyle(MBColor.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    Button(action: { model.chooseSubscriptionAuthFile() }) {
+                    Button(action: { model.beginChatGPTSignIn() }) {
                         Label(model.authResolutionLabel, systemImage: model.authResolutionSystemImage)
                     }
                     .buttonStyle(.borderedProminent)
@@ -1258,7 +1287,7 @@ struct ContentView: View {
                         } else if model.isUpstreamReady {
                             model.toggleDaemon()
                         } else {
-                            model.chooseSubscriptionAuthFile()
+                            model.beginChatGPTSignIn()
                         }
                     },
                     isDisabled: model.authState == nil

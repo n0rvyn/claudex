@@ -179,6 +179,7 @@ public final class LocalHTTPServer {
     private let configuration: RouterConfiguration
     private let handler: Handler
     private var listener: NWListener?
+    private let connections = ServerConnections()
 
     public init(configuration: RouterConfiguration, handler: @escaping Handler) {
         self.configuration = configuration
@@ -205,10 +206,7 @@ public final class LocalHTTPServer {
             tcpOptions.noDelay = true
         }
 
-        let listener = try NWListener(
-            using: parameters,
-            on: NWEndpoint.Port(integerLiteral: NWEndpoint.Port.IntegerLiteralType(configuration.port))
-        )
+        let listener = try NWListener(using: parameters)
 
         listener.stateUpdateHandler = { state in
             switch state {
@@ -219,11 +217,22 @@ public final class LocalHTTPServer {
             }
         }
 
-        listener.newConnectionHandler = { [handler] connection in
+        connections.open()
+        listener.newConnectionHandler = { [handler, connections] connection in
+            let id = UUID()
+            guard connections.insert(connection, id: id) else { connection.cancel(); return }
             connection.start(queue: .global(qos: .userInitiated))
-            Task.detached {
-                await LocalHTTPServer.serve(connection: connection, handler: handler)
+            let lifetime = ConnectionTaskLifetime()
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .failed, .cancelled: lifetime.cancel()
+                default: break
+                }
             }
+            lifetime.set(Task.detached {
+                defer { connections.remove(id) }
+                await LocalHTTPServer.serve(connection: connection, handler: handler)
+            })
         }
 
         listener.start(queue: .global(qos: .userInitiated))
@@ -231,6 +240,7 @@ public final class LocalHTTPServer {
     }
 
     public func stop() {
+        connections.close()
         listener?.cancel()
         listener = nil
     }
@@ -442,4 +452,34 @@ enum HTTPParsingError: Error {
     case invalidUTF8
     case missingRequestLine
     case invalidRequestLine
+}
+
+private final class ConnectionTaskLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+    func set(_ task: Task<Void, Never>) {
+        lock.lock(); self.task = task; let cancelled = self.cancelled; lock.unlock()
+        if cancelled { task.cancel() }
+    }
+    func cancel() {
+        lock.lock(); cancelled = true; let task = self.task; self.task = nil; lock.unlock()
+        task?.cancel()
+    }
+}
+
+/// Listener shutdown closes active client sockets, which cancels their inference tasks.
+private final class ServerConnections: @unchecked Sendable {
+    private let lock = NSLock()
+    private var accepting = false
+    private var active: [UUID: NWConnection] = [:]
+    func open() { lock.withLock { accepting = true } }
+    func insert(_ connection: NWConnection, id: UUID) -> Bool {
+        lock.withLock { guard accepting else { return false }; active[id] = connection; return true }
+    }
+    func remove(_ id: UUID) { _ = lock.withLock { active.removeValue(forKey: id) } }
+    func close() {
+        let sockets = lock.withLock { accepting = false; let values = Array(active.values); active.removeAll(); return values }
+        for socket in sockets { socket.cancel() }
+    }
 }

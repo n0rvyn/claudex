@@ -501,104 +501,44 @@ private struct UpstreamSettingsTab: View {
                     label: "Responses URL",
                     help: "The subscription-backed HTTP endpoint to forward to."
                 ) {
-                    TextField("", text: $model.responsesURLDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(MBFont.mono)
+                    Text("https://api.openai.com/v1/responses").font(MBFont.mono).textSelection(.enabled)
                 }
             }
 
             MBSection(title: "Routing policy") {
+                Button("Load models available to this account") { Task { await model.loadChatGPTModelCatalog() } }
+                    .disabled(model.isLoadingModelCatalog || !model.chatGPTAccounts.contains(where: { $0.active && $0.authorized }))
+                ForEach(model.availableChatGPTModels) { available in
+                    Text("\(available.label) · \(available.id)").font(MBFont.mono).textSelection(.enabled)
+                }
+                if let error = model.modelCatalogError { Text(error).foregroundStyle(MBColor.faultInk) }
+                Text("Existing routes are preserved. Availability does not establish subscription cost or supported reasoning effort.").font(.caption).foregroundStyle(MBColor.inkDim)
                 RoutingPolicyEditor(model: model)
             }
 
-            MBSection(title: "Subscription auth") {
-                MBField(
-                    label: "Auth file",
-                    help: "Click Choose, then select ~/.codex/auth.json from your home folder.",
-                    stacked: true
-                ) {
-                    HStack(spacing: 6) {
-                        TextField("", text: Binding(
-                            get: { model.subscriptionAuthFilePathDraft },
-                            set: { model.updateSubscriptionAuthFilePathDraft($0) }
-                        ))
-                            .textFieldStyle(.roundedBorder)
-                            .font(MBFont.mono)
-                        Button(action: { model.chooseSubscriptionAuthFile() }) {
-                            Label("Choose", systemImage: "key.horizontal")
+            MBSection(title: "ChatGPT account") {
+                ForEach(model.chatGPTAccounts) { account in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(account.label)
+                            Text(account.clientID).font(MBFont.mono).foregroundStyle(MBColor.inkDim)
                         }
-                        Button(action: { model.openSubscriptionAuthLocation() }) {
-                            Label("Reveal", systemImage: "folder")
-                        }
+                        Spacer()
+                        if account.active { Text("Active").foregroundStyle(MBColor.liveInk) }
+                        else { Button("Use account") { model.selectChatGPTAccount(account.id) } }
+                        if account.authorized { Button("Sign out") { model.signOutChatGPT(account.id) } }
+                        else { Button("Continue with ChatGPT") { model.beginChatGPTSignIn(accountID: account.id) } }
                     }
                 }
-                MBField(label: "Auth state") {
-                    HStack(spacing: 6) {
-                        MBDot(state: model.isUpstreamReady ? .live : .warn, size: 8)
-                        Text(model.authText)
-                            .font(.system(size: 12))
-                            .foregroundStyle(MBColor.inkMid)
-                            .textSelection(.enabled)
-                    }
+                if model.isSigningIn {
+                    HStack { ProgressView(); Text("Waiting for browser authorization"); Button("Cancel") { model.cancelChatGPTSignIn() } }
+                } else {
+                    Button("Continue with ChatGPT") { model.beginChatGPTSignIn() }
+                        .buttonStyle(.borderedProminent)
                 }
-                if model.requiresAuthAttention {
-                    MBField(label: "Next step") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(model.authInstructionText)
-                                .font(.system(size: 11))
-                                .foregroundStyle(MBColor.inkDim)
-                            Button(action: { model.chooseSubscriptionAuthFile() }) {
-                                Label(model.authResolutionLabel, systemImage: model.authResolutionSystemImage)
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
-                }
-            }
-
-            MBSection(title: "Token status") {
-                MBField(label: "Access token") {
-                    Text(model.doctorSnapshot?.accessTokenPreview ?? "—")
-                        .font(MBFont.mono)
-                        .foregroundStyle(MBColor.inkMid)
-                        .textSelection(.enabled)
-                }
-                MBField(label: "Last refresh") {
-                    Text(relativeRefreshText(model.doctorSnapshot?.lastRefresh))
-                        .font(.system(size: 12))
-                        .foregroundStyle(MBColor.inkMid)
-                }
-                MBField(label: "State") {
-                    HStack(spacing: 6) {
-                        MBDot(state: tokenDotState, size: 8)
-                        Text(tokenStateText)
-                            .font(.system(size: 12))
-                            .foregroundStyle(MBColor.inkMid)
-                    }
-                }
-                MBField(label: "Refresh") {
-                    HStack(spacing: 8) {
-                        Button(action: { Task { await model.refreshTokenNow() } }) {
-                            Label("Refresh now", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(model.isRefreshingToken)
-                        if model.isRefreshingToken {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-                }
-                if let error = model.tokenRefreshError {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(error)
-                            .font(.system(size: 12))
-                            .foregroundStyle(MBColor.faultInk)
-                        Button(action: { model.chooseSubscriptionAuthFile() }) {
-                            Label("Re-authorize auth file", systemImage: "key.horizontal")
-                        }
-                        .controlSize(.small)
-                    }
-                }
+                if let error = model.signInError { Text(error).foregroundStyle(MBColor.faultInk) }
+                Text("Authorize Claudex to use your ChatGPT plan. Claude Code continues to execute tools and handle permissions.")
+                    .font(.caption).foregroundStyle(MBColor.inkDim)
             }
 
             HStack(spacing: 8) {
@@ -614,6 +554,7 @@ private struct UpstreamSettingsTab: View {
             .padding(.top, 4)
         }
         .task {
+            await model.loadChatGPTAccounts()
             await model.startTokenStatusPolling()
         }
     }
@@ -827,14 +768,7 @@ private struct RoutingPolicyEditor: View {
                         draft: $model.fallbackRouteDraft
                     )
 
-                    routeDivider
 
-                    RoutePolicyBlock(
-                        title: "Advisor route",
-                        badge: "ADVISOR",
-                        help: "Used only for advisor sub-calls.",
-                        draft: $model.advisorRouteDraft
-                    )
                 }
             }
         }

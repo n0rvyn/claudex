@@ -6,6 +6,9 @@ private actor OAuthFixtureHTTP: SIWCHTTP {
     var requests: [URLRequest] = []
     func send(_ request: URLRequest) async throws -> (Data, Int) {
         requests.append(request)
+        if request.url?.path == "/v1/models" {
+            return (Data(#"{"models":[{"slug":"fixture-eligible","display_name":"Fixture","visibility":"list"},{"slug":"fixture-hidden","visibility":"hidden"}]}"#.utf8), 200)
+        }
         let json = #"{"access_token":"fixture-new","refresh_token":"fixture-rotated","token_type":"Bearer","expires_in":3600,"scope":"chatgpt.tokens.use.direct resource.invoke"}"#
         return (Data(json.utf8), 200)
     }
@@ -95,4 +98,34 @@ struct SIWCAuthTests {
         let auth = SIWCAuth(store: store, http: OAuthFixtureHTTP())
         await #expect(throws: SIWCError.self) { _ = try await auth.loadCurrent() }
     }
+    @Test func explicitModelDiscoveryIsAccountScopedAndDoesNotInfer() async throws {
+        let store = store(); defer { try? FileManager.default.removeItem(at: store.directory) }
+        let account = SIWCAccount(clientID: "oaiapp_fixture", subject: "fixture-sub", email: nil,
+            accessToken: "fixture-access", refreshToken: nil, idToken: nil,
+            scopes: ["chatgpt.tokens.use.direct", "resource.invoke"], expiresAt: Date().addingTimeInterval(3600))
+        let fd = try await store.acquire()
+        try store.write(SIWCState(accounts: [account], activeID: account.id)); store.release(fd)
+        let http = OAuthFixtureHTTP(), auth = SIWCAuth(store: store, http: http)
+        #expect(await http.count == 0)
+        let models = try await auth.availableModels()
+        #expect(models.count == 1)
+        #expect(models.first?.id == "fixture-eligible")
+        #expect(models.first?.accountID == account.id)
+        #expect(await http.count == 1)
+    }
+    @Test @MainActor func callbackListenerIsReadyBeforeBrowserURLIsReturned() async throws {
+        let store = store(); defer { try? FileManager.default.removeItem(at: store.directory) }
+        let http = OAuthFixtureHTTP(), auth = SIWCAuth(store: store, http: http)
+        let signIn = SIWCSignIn(auth: auth)
+        let url = try await signIn.start()
+        let params = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        let redirect = try #require(params.first(where: { $0.name == "redirect_uri" })?.value)
+        let callback = try #require(URLComponents(string: redirect))
+        #expect(callback.host == "127.0.0.1")
+        #expect((callback.port ?? 0) > 0)
+        #expect(callback.path == "/auth/callback")
+        #expect(await http.count == 0)
+        await signIn.cancel()
+    }
+
 }

@@ -2,19 +2,13 @@ import Foundation
 
 public actor GatewayDaemon {
     private let configuration: RouterConfiguration
-    private let bridge: AnthropicBridge
+    private let bridge: SIWCBridge
     private var server: LocalHTTPServer?
     private var startedAt: Date?
 
     public init(configuration: RouterConfiguration = RouterConfiguration()) {
         self.configuration = configuration
-        self.bridge = AnthropicBridge(
-            configuration: configuration,
-            sessionLoader: SubscriptionSessionLoader(
-                authFileURL: URL(fileURLWithPath: configuration.subscriptionAuthFilePath),
-                securityScopedBookmarkData: configuration.subscriptionAuthBookmarkData
-            )
-        )
+        self.bridge = SIWCBridge(configuration: configuration)
     }
 
     public func start() throws {
@@ -79,7 +73,7 @@ public actor GatewayDaemon {
     private static func route(
         request: HTTPRequest,
         configuration: RouterConfiguration,
-        bridge: AnthropicBridge
+        bridge: SIWCBridge
     ) async -> HTTPResponse {
         switch (request.method, request.path) {
         case ("HEAD", "/"):

@@ -2,17 +2,12 @@
 
 ## Active Development Guide
 
-**当前在进行的重构:** `docs/06-plans/2026-04-22-modelbridge-refactoring-dev-guide.md`
-
-- Status: `active`，7 phases，Phase 1 未开工
-- 进入方式: `/run-phase`（从 Phase 1 开始，skill 自管 `.claude/dev-workflow-state.yml`）
-- 所有 DP-001..005 已 auto-resolved 按 Recommendation，用户可在 Phase 1 启动前推翻
-- 设计证据基座: `docs/scheme3/01-validated-baseline.md` + `10-tool-mapping-v1.md` + `08-responses-http-contract.md` + `09-real-upstream-capture.md` + `16-request-shape-comparison-v1.md`
-- 需要验证的 probe 任务（Phase 2/3/5）统一参考 `scripts/probe_responses_advisor_bridge.py` 的认证 + zstd + SSE 解析模板
+Current guide: `docs/06-plans/2026-10-08-siwc-refactor-dev-guide.md`.
+The 2026-04 private-backend experiments are historical evidence. Never run their credential-reading/live probes during offline work.
 
 ## Project Structure & Module Organization
 
-`Claudex` is a macOS menu bar app plus a local gateway runtime. Use the Xcode target in `Claudex/` for the shipping app shell (`ClaudexApp.swift`, `ContentView.swift`, assets). Keep shared runtime code in `Sources/CCRouterCore/`; this is the bridge that serves `/v1/messages` and forwards to Codex subscription endpoints. CLI helpers live in `Sources/CCRouterDaemon/` and `Sources/CCRouterApp/`. Swift package tests are in `Tests/CCRouterCoreTests/`. Project docs and validated research live under `docs/`, and repeatable workflows live under `scripts/`.
+`Claudex` is a macOS menu bar app plus a local gateway runtime. Use the Xcode target in `Claudex/` for the shipping app shell (`ClaudexApp.swift`, `ContentView.swift`, assets). Keep shared runtime code in `Sources/CCRouterCore/`; this is the bridge that serves `/v1/messages` and forwards to the official SIWC-authorized public Responses endpoint. CLI helpers live in `Sources/CCRouterDaemon/` and `Sources/CCRouterApp/`. Swift package tests are in `Tests/CCRouterCoreTests/`. Project docs and validated research live under `docs/`, and repeatable workflows live under `scripts/`.
 
 ## Build, Test, and Development Commands
 
@@ -20,7 +15,7 @@
 - `swift test --scratch-path /tmp/ClaudexSwiftTest`: run Swift Testing suites in `Tests/CCRouterCoreTests`.
 - `xcodebuild test -project Claudex.xcodeproj -scheme Claudex -destination 'platform=macOS' -only-testing:ClaudexTests`: run the Xcode unit-test target.
 - `bash scripts/build_app_bundle.sh`: produce `dist/Claudex.app` with ad hoc signing.
-- `bash scripts/smoke_local_gateway.sh`: start the local daemon and verify the real `Claude Code CLI -> ANTHROPIC_BASE_URL` path.
+- `bash scripts/smoke_local_gateway.sh`: run offline SIWC/loopback fixtures without sign-in or inference.
 
 ## Coding Style & Naming Conventions
 
@@ -32,8 +27,10 @@ Use Swift Testing (`import Testing`, `@Test`, `#expect`); do not add XCTest to p
 
 ## Commit & Pull Request Guidelines
 
-This workspace snapshot does not include `.git`, so no local commit history is available to infer conventions. Use short, imperative commit subjects, preferably Conventional Commit style such as `feat(gateway): add health diagnostics`. PRs should include: purpose, affected paths, validation commands run, and screenshots for SwiftUI or menu bar changes.
+Use short, imperative commit subjects, preferably Conventional Commit style such as `feat(gateway): add health diagnostics`. PRs should include: purpose, affected paths, validation commands run, and screenshots for SwiftUI or menu bar changes.
 
 ## Security & Configuration Tips
 
-Do not commit local auth material. The runtime reads subscription state from `~/.codex/auth.json` and local gateway config from `~/Library/Application Support/Claudex/config.json` (path derived from `com.90percent.Claudex` bundle ID) unless overridden by `CC_ROUTER_*`. Use `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` only against the local daemon during development.
+Do not commit local auth material. The runtime owns SIWC registrations in `~/Library/Application Support/Claudex/SIWC/accounts.json`; it never imports Codex credentials. Local gateway config from `~/Library/Application Support/Claudex/config.json` (path derived from `com.90percent.Claudex` bundle ID) unless overridden by `CC_ROUTER_*`. Use `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` only against the local daemon during development.
+
+Live validation is separately gated on explicit user browser consent. Use account-discovered eligible models and minimum supported effort; never infer subscription cost from API pricing or names. At most three tiny serial model calls, including retries, after approval. No parallel probes or billing fallback. Claude Code compatibility target is local version 2.1.292; live compatibility remains unverified.

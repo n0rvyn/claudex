@@ -67,7 +67,7 @@ struct DoctorSnapshotTests {
         let status = await bridge.doctorStatus()
         #expect(status.hasRefreshToken == true)
         #expect(status.lastRefresh != nil)
-        #expect(status.accessTokenPreview == "acce…-old")
+        #expect(status.accessTokenPreview == "[redacted]")
 
         // Cleanup
         try? FileManager.default.removeItem(at: tempDir)
@@ -111,7 +111,7 @@ struct DoctorSnapshotTests {
         let status = await bridge.doctorStatus()
         #expect(status.hasRefreshToken == false)
         #expect(status.lastRefresh == nil)
-        #expect(status.accessTokenPreview == "acce…-old")
+        #expect(status.accessTokenPreview == "[redacted]")
 
         // Cleanup
         try? FileManager.default.removeItem(at: tempDir)
@@ -151,6 +151,6 @@ struct DoctorSnapshotTests {
         )
 
         let status = await bridge.doctorStatus()
-        #expect(status.accessTokenPreview == "abcd…5678")
+        #expect(status.accessTokenPreview == "[redacted]")
     }
 }

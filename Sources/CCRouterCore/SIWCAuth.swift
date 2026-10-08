@@ -51,10 +51,16 @@ public final class SIWCStore: @unchecked Sendable {
         try await Task.detached { [directory] in
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
+        try SIWCStore.validateDirectory(directory)
         let fd = open(directory.appendingPathComponent("session.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
         guard fd >= 0, flock(fd, LOCK_EX) == 0 else { if fd >= 0 { close(fd) }; throw SIWCError.storage }
         return fd
         }.value
+    }
+    static func validateDirectory(_ directory: URL) throws {
+        var info = stat()
+        guard lstat(directory.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+              info.st_uid == getuid(), info.st_mode & 0o077 == 0 else { throw SIWCError.storage }
     }
     func release(_ fd: Int32) { flock(fd, LOCK_UN); close(fd) }
     func read() throws -> SIWCState {
@@ -88,7 +94,9 @@ public protocol SIWCHTTP: Sendable {
 public struct SIWCURLHTTP: SIWCHTTP {
     public init() {}
     public func send(_ request: URLRequest) async throws -> (Data, Int) {
-        let (data, response) = try await URLSession(configuration: .ephemeral, delegate: SIWCNoRedirects(), delegateQueue: nil).data(for: request)
+        let session = URLSession(configuration: .ephemeral, delegate: SIWCNoRedirects(), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let (data, response) = try await session.data(for: request)
         guard let status = (response as? HTTPURLResponse)?.statusCode else { throw SIWCError.remote("invalid_response") }
         return (data, status)
     }
@@ -254,6 +262,20 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         try store.write(state)
         return revoked
     }
+    /// Explicit user action only; does not select a model or infer cost/effort from its name.
+    public func availableModels() async throws -> [SIWCModelSummary] {
+        let credentials = try await loadCurrent()
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        request.setValue("Bearer " + credentials.accessToken, forHTTPHeaderField: "Authorization")
+        let (data, status) = try await http.send(request)
+        guard status == 200 else { throw SIWCError.remote("model_catalog_\(status)") }
+        guard let catalog = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = catalog["models"] as? [[String: Any]] else { throw SIWCError.remote("invalid_model_catalog") }
+        return models.compactMap { model in
+            guard model["visibility"] as? String == "list", let slug = model["slug"] as? String else { return nil }
+            return SIWCModelSummary(id: slug, label: model["display_name"] as? String ?? slug, accountID: credentials.accountID)
+        }
+    }
     private func validateScopes(_ scopes: [String]) throws {
         guard scopes.contains("chatgpt.tokens.use.direct"), scopes.contains("resource.invoke") else { throw SIWCError.permissionRequired }
     }
@@ -300,6 +322,8 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         let jwks = try await getJSON(url)
         guard let keys = jwks["keys"] as? [[String: Any]],
               let key = keys.first(where: { $0["kid"] as? String == kid && $0["kty"] as? String == "RSA" }),
+              (key["alg"] == nil || key["alg"] as? String == "RS256"),
+              (key["use"] == nil || key["use"] as? String == "sig"),
               let n = key["n"] as? String, let e = key["e"] as? String,
               let modulus = Data(base64URL: n), let exponent = Data(base64URL: e) else { throw SIWCError.invalidIdentity }
         let keyData = Self.der(0x30, Self.derInteger(modulus) + Self.derInteger(exponent))
@@ -313,6 +337,7 @@ public actor SIWCAuth: SubscriptionSessionProviding {
               let subject = payload["sub"] as? String, !subject.isEmpty,
               nonce == nil || payload["nonce"] as? String == nonce else { throw SIWCError.invalidIdentity }
         if let aud = payload["aud"] as? [String], aud.count > 1, payload["azp"] as? String != clientID { throw SIWCError.invalidIdentity }
+        if let nbf = payload["nbf"] as? Double, nbf > Date().timeIntervalSince1970 { throw SIWCError.invalidIdentity }
         return (subject, payload["email"] as? String)
     }
     static func derInteger(_ data: Data) -> Data {
@@ -340,4 +365,10 @@ extension Data {
         let encoded = string.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         self.init(base64Encoded: encoded + String(repeating: "=", count: (4 - encoded.count % 4) % 4))
     }
+}
+
+public struct SIWCModelSummary: Sendable, Identifiable {
+    public let id: String
+    public let label: String
+    public let accountID: String
 }

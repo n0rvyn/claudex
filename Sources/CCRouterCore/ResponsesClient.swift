@@ -13,17 +13,17 @@ public actor ResponsesClient {
     private let session: URLSession
     private let endpoint: URL
 
-    public init(endpoint: URL = URL(string: "https://chatgpt.com/backend-api/codex/responses")!) {
+    public init(endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!) {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 120
         configuration.timeoutIntervalForResource = 300
-        self.session = URLSession(configuration: configuration)
+        self.session = URLSession(configuration: configuration, delegate: SIWCNoRedirects(), delegateQueue: nil)
         self.endpoint = endpoint
     }
 
     /// Constructs a ResponsesClient with a custom URLSession — intended for
     /// test-only injection of URLProtocol stubs (e.g. MockSSEProtocol).
-    public init(session: URLSession, endpoint: URL = URL(string: "https://chatgpt.com/backend-api/codex/responses")!) {
+    public init(session: URLSession, endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!) {
         self.session = session
         self.endpoint = endpoint
     }
@@ -53,7 +53,38 @@ public actor ResponsesClient {
             throw ResponsesHTTPError(statusCode: httpResponse.statusCode, body: bodyString)
         }
 
-        return Self.parseSSELines(bytes.lines)
+        return Self.parseStrictSSELines(bytes.lines)
+    }
+
+    /// Parse complete SSE frames; malformed JSON and truncated frames fail closed.
+    internal static func parseStrictSSELines<S: AsyncSequence & Sendable>(_ lines: S)
+        -> AsyncThrowingStream<JSONObject, Error> where S.Element == String {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var dataLines: [String] = []
+                do {
+                    for try await line in lines {
+                        try Task.checkCancellation()
+                        if line.isEmpty {
+                            if !dataLines.isEmpty {
+                                let payload = dataLines.joined(separator: "\n")
+                                dataLines = []
+                                if payload != "[DONE]" {
+                                    continuation.yield(try JSONDecoder().decode(JSONObject.self, from: Data(payload.utf8)))
+                                }
+                            }
+                        } else if line.hasPrefix("data:") {
+                            var data = String(line.dropFirst(5))
+                            if data.hasPrefix(" ") { data.removeFirst() }
+                            dataLines.append(data)
+                        }
+                    }
+                    guard dataLines.isEmpty else { throw SIWCError.remote("truncated_sse_frame") }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Drains an async byte sequence into a UTF-8 string (or a byte-count
@@ -152,16 +183,13 @@ public actor ResponsesClient {
         credentials: SubscriptionCredentials
     ) throws -> URLRequest {
         let encoded = try JSONEncoder().encode(payload)
-        let compressed = try ZstdCodec.compress(encoded)
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.httpBody = compressed
+        request.httpBody = encoded
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue(credentials.accountID, forHTTPHeaderField: "chatgpt-account-id")
         request.setValue("text/event-stream", forHTTPHeaderField: "accept")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-        request.setValue("zstd", forHTTPHeaderField: "content-encoding")
         request.setValue("Claudex/0.1", forHTTPHeaderField: "user-agent")
 
         return request

@@ -11,6 +11,7 @@ public struct AnthropicMessagesRequest: Codable, Sendable {
     public let metadata: JSONObject?
     public let output_config: JSONObject?
     public let stream: Bool?
+    public let tool_choice: JSONObject?
 
     public init(
         model: String,
@@ -22,7 +23,8 @@ public struct AnthropicMessagesRequest: Codable, Sendable {
         context_management: JSONObject?,
         metadata: JSONObject?,
         output_config: JSONObject?,
-        stream: Bool?
+        stream: Bool?,
+        tool_choice: JSONObject? = nil
     ) {
         self.model = model
         self.max_tokens = max_tokens
@@ -34,6 +36,7 @@ public struct AnthropicMessagesRequest: Codable, Sendable {
         self.metadata = metadata
         self.output_config = output_config
         self.stream = stream
+        self.tool_choice = tool_choice
     }
 
     enum CodingKeys: String, CodingKey {
@@ -47,6 +50,7 @@ public struct AnthropicMessagesRequest: Codable, Sendable {
         case metadata
         case output_config
         case stream
+        case tool_choice
     }
 
     public init(from decoder: Decoder) throws {
@@ -61,6 +65,7 @@ public struct AnthropicMessagesRequest: Codable, Sendable {
         self.metadata = try container.decodeIfPresent(JSONObject.self, forKey: .metadata)
         self.output_config = try container.decodeIfPresent(JSONObject.self, forKey: .output_config)
         self.stream = try container.decodeIfPresent(Bool.self, forKey: .stream)
+        self.tool_choice = try container.decodeIfPresent(JSONObject.self, forKey: .tool_choice)
     }
 
     private static func decodeSystem(from container: KeyedDecodingContainer<CodingKeys>) throws -> [JSONObject]? {

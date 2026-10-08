@@ -46,7 +46,7 @@ struct RouterConfigurationStoreTests {
         #expect(configuration.host == "127.0.0.2")
         #expect(configuration.port == 4999)
         #expect(configuration.gatewayAuthToken == "env-token")
-        #expect(configuration.subscriptionAuthFilePath.hasSuffix("/auth.json"))
+        #expect(configuration.subscriptionAuthFilePath == SIWCStore.defaultDirectory.path)
         #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_AUTH_TOKEN=env-token"))
     }
 
@@ -86,8 +86,8 @@ struct RouterConfigurationStoreTests {
         #expect(saved.port == 4988)
         #expect(saved.executorModel == "gpt-5.5")
         #expect(saved.advisorModel == "gpt-5.5")
-        #expect(saved.subscriptionAuthFilePath.hasSuffix("/auth-2.json"))
-        #expect(saved.subscriptionAuthBookmarkData == Data("bookmark".utf8))
+        #expect(saved.subscriptionAuthFilePath == SIWCStore.defaultDirectory.path)
+        #expect(saved.subscriptionAuthBookmarkData == nil)
     }
 
     @Test
@@ -154,11 +154,9 @@ struct RouterConfigurationStoreTests {
 
         #expect(
             configuration.subscriptionAuthFilePath
-                == UserHomeResolver.defaultSubscriptionAuthFilePath(
-                    fallbackHomeDirectoryURL: containerizedHome
-                )
+                == SIWCStore.defaultDirectory.path
         )
-        #expect(configuration.configurationWarning?.contains("App Sandbox") == true)
+        #expect(configuration.responsesURL == "https://api.openai.com/v1/responses")
     }
 
     @Test
@@ -187,9 +185,7 @@ struct RouterConfigurationStoreTests {
         #expect(configuration.subscriptionAuthFilePath != legacyStoredPath)
         #expect(
             configuration.subscriptionAuthFilePath
-                == UserHomeResolver.defaultSubscriptionAuthFilePath(
-                    fallbackHomeDirectoryURL: containerizedHome
-                )
+                == SIWCStore.defaultDirectory.path
         )
     }
 }

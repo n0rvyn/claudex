@@ -26,11 +26,24 @@ final class AppModel: ObservableObject {
     private let configurationStore = RouterConfigurationStore()
     private let launchAtLoginController = LaunchAtLoginController()
     private var daemon = GatewayDaemon()
+    private let signIn = SIWCSignIn()
 
     init() {
         refreshLocalConfiguration()
     }
 
+    func beginChatGPTSignIn() {
+        signIn.onCompletion = { [weak self] result in
+            switch result {
+            case .success: self?.statusText = "ChatGPT authorized"; self?.refresh()
+            case .failure(let error): self?.statusText = error.localizedDescription
+            }
+        }
+        Task {
+            do { let url = try await signIn.start(); NSWorkspace.shared.open(url) }
+            catch { statusText = error.localizedDescription }
+        }
+    }
     func startDaemon() {
         Task {
             do {
@@ -113,10 +126,10 @@ final class AppModel: ObservableObject {
     private func makeDoctorNotes(configurationWarning: String?) -> [String] {
         var notes = [
             "Claude Code integration uses ANTHROPIC_BASE_URL -> local gateway.",
-            "Local gateway forwards Anthropic Messages to chatgpt.com/backend-api/codex/responses.",
+            "Local gateway forwards Anthropic Messages to api.openai.com/v1/responses.",
             "Ingress auth is enforced through x-api-key from ANTHROPIC_AUTH_TOKEN.",
             "Launch at login uses SMAppService.mainApp from the packaged app bundle.",
-            "Validated paths: default text, bare text, Bash, Read, advisor, Notion auth.",
+            "Offline fixtures verify SIWC identity, full-history replay, tool streams and failure handling. Live account compatibility requires user authorization.",
         ]
         if let configurationWarning, !configurationWarning.isEmpty {
             notes.append(configurationWarning)
@@ -150,6 +163,7 @@ struct CCRouterApp: App {
                 }
 
                 HStack {
+                    Button("Continue with ChatGPT") { model.beginChatGPTSignIn() }
                     Button("Start Daemon") {
                         model.startDaemon()
                     }

@@ -77,6 +77,31 @@ final class AnthropicSSEEncoder: @unchecked Sendable {
         ]))
     }
 
+    /// Parallel calls retain independent content-block indexes while arguments stream.
+    func startToolUse(id: String, name: String) async throws -> Int {
+        try await closeOpenBlock()
+        currentBlockIndex += 1
+        let index = currentBlockIndex
+        try await send(event: "content_block_start", data: JSONObject.from([
+            "type": .string("content_block_start"), "index": .number(Double(index)),
+            "content_block": .object(JSONObject.from([
+                "type": .string("tool_use"), "id": .string(id), "name": .string(name), "input": .object(JSONObject())
+            ]))
+        ]))
+        return index
+    }
+    func emitToolArgument(delta: String, index: Int) async throws {
+        try await send(event: "content_block_delta", data: JSONObject.from([
+            "type": .string("content_block_delta"), "index": .number(Double(index)),
+            "delta": .object(JSONObject.from(["type": .string("input_json_delta"), "partial_json": .string(delta)]))
+        ]))
+    }
+    func stopToolUse(index: Int) async throws {
+        try await send(event: "content_block_stop", data: JSONObject.from([
+            "type": .string("content_block_stop"), "index": .number(Double(index))
+        ]))
+    }
+
     /// Emits a complete tool-use content block as three frames:
     /// content_block_start → content_block_delta(input_json_delta) → content_block_stop.
     func emitToolUseBlock(id: String, name: String, argumentsJSON: String) async throws {

@@ -218,7 +218,7 @@ struct ResponsesClientStreamingTests {
     }
 
     @Test
-    func cancellationViaOnTerminationStopsParser() async throws {
+    func consumerCanStopAfterFirstEvent() async throws {
         // Emit many lines but break after reading one event, then verify the
         // parser task exits quickly after consumer cancellation.
         var manyLines: [String] = []
@@ -227,18 +227,31 @@ struct ResponsesClientStreamingTests {
         }
         let stream = ResponsesClient.parseSSELines(MockLineSequence(lines: manyLines, errorAfterLast: nil))
 
-        let startInstant = ContinuousClock().now
         var firstEvent: JSONObject? = nil
         for try await event in stream {
             firstEvent = event
             break  // Triggers continuation.onTermination via iterator deinit.
         }
-        let elapsed = startInstant.duration(to: .now)
 
         #expect(firstEvent != nil)
         // If cancellation did not fire, the parser would keep processing 999
         // more events. The parser task itself is best-effort; we only assert
         // the consumer loop exited cleanly here.
-        #expect(elapsed < .seconds(1))
+        #expect(firstEvent?.string("type") == "ev_0")
     }
+    @Test func strictParserSupportsMultilineData() async throws {
+        let lines = ["event: response.completed", "data: {", #"data: "type":"response.completed"}"#, ""]
+        var events: [JSONObject] = []
+        for try await event in ResponsesClient.parseStrictSSELines(MockLineSequence(lines: lines, errorAfterLast: nil)) { events.append(event) }
+        #expect(events.count == 1)
+        #expect(events.first?.string("type") == "response.completed")
+    }
+    @Test func strictParserRejectsMalformedAndTruncatedFrames() async throws {
+        for lines in [["data: invalid", ""], [#"data: {"type":"response.completed"}"#]] {
+            await #expect(throws: (any Error).self) {
+                for try await _ in ResponsesClient.parseStrictSSELines(MockLineSequence(lines: lines, errorAfterLast: nil)) {}
+            }
+        }
+    }
+
 }

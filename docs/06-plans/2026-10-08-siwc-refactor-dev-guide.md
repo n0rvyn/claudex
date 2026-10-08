@@ -33,3 +33,7 @@ Untrusted local HTTP clients, OAuth callbacks and upstream event streams cross s
 
 ## Decisions
 None pending for offline work. No publication, pushes, device/simulator operations, credential transmission, or live inference are authorized by this plan.
+
+## Offline completion record
+
+Implemented phases 1–5 and validated with 262 offline tests plus macOS app/unit-test-target compilation. See `2026-10-08-siwc-validation.md` for evidence and honest limits. Live validation remains separately gated on user browser consent and at most three tiny serial calls, with an account-established low-cost eligible model/minimum supported effort. No live calls were made.
