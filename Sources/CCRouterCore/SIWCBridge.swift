@@ -50,6 +50,7 @@ public actor SIWCBridge {
     public func handleMessages(_ request: HTTPRequest) async -> HTTPResponse {
         do {
             let input = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: request.body)
+            try await AcceptanceInferenceGuard.shared.observeIngress(input, headers: request.headers)
             let policy = routing
             let credentials = try await auth.loadCurrent()
             let session = request.headers["x-claude-code-session-id"] ?? Self.sessionFromMetadata(input.metadata)

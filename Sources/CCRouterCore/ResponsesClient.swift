@@ -50,6 +50,7 @@ public actor ResponsesClient {
     public func streamEvents(request payload: JSONObject, credentials: SubscriptionCredentials, requestID: UUID) async throws -> AsyncThrowingStream<JSONObject, Error> {
         let request = try makeRequest(payload: payload, credentials: credentials)
 
+        try await AcceptanceInferenceGuard.shared.reserve(payload: payload)
         let (bytes, response) = try await session.bytes(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
