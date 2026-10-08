@@ -7,7 +7,6 @@ import SwiftUI
 
 struct DoctorSettingsView: View {
     @ObservedObject var model: AppModel
-    @State private var selection: SettingsTab = .upstream
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -23,7 +22,7 @@ struct DoctorSettingsView: View {
                 .padding(14).frame(width: 178).frame(maxHeight: .infinity).background(MBColor.paperDim)
                 Divider()
                 Group {
-                    switch selection {
+                    switch model.settingsTab {
                     case .general: GeneralSettingsTab(model: model)
                     case .gateway: GatewaySettingsTab(model: model)
                     case .claudeCode: ClaudeCodeSettingsTab(model: model)
@@ -39,21 +38,21 @@ struct DoctorSettingsView: View {
         .onAppear {
             #if DEBUG
             switch ProcessInfo.processInfo.environment["CLAUDEX_UI_PANE"] {
-            case "general": selection = .general
-            case "gateway": selection = .gateway
-            case "claudeCode": selection = .claudeCode
-            case "diagnostics": selection = .diagnostics
+            case "general": model.settingsTab = .general
+            case "gateway": model.settingsTab = .gateway
+            case "claudeCode": model.settingsTab = .claudeCode
+            case "diagnostics": model.settingsTab = .diagnostics
             default: break
             }
             #endif
         }
     }
     private func navigation(_ title: String, icon: String, tab: SettingsTab) -> some View {
-        Button { selection = tab } label: {
+        Button { model.settingsTab = tab } label: {
             Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 9).padding(.vertical, 8)
-                .foregroundStyle(selection == tab ? MBColor.ink : MBColor.inkDim)
-                .background(selection == tab ? MBColor.brandSoft : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .foregroundStyle(model.settingsTab == tab ? MBColor.ink : MBColor.inkDim)
+                .background(model.settingsTab == tab ? MBColor.brandSoft : .clear, in: RoundedRectangle(cornerRadius: 7))
         }.buttonStyle(.plain).accessibilityLabel(title)
     }
 }
@@ -95,7 +94,7 @@ private struct SettingsFooter: View {
     }
 }
 
-private enum SettingsTab: Hashable {
+enum SettingsTab: Hashable {
     case general, gateway, claudeCode, upstream, diagnostics
 }
 
@@ -467,11 +466,7 @@ private struct ClaudeCodeSettingsTab: View {
                     help: "Running this command consumes plan usage. Full Claude Code sessions have not yet been validated.",
                     stacked: true
                 ) {
-                    MBReadOnlyField(value: """
-                    ANTHROPIC_BASE_URL=\(model.endpoint)
-                    ANTHROPIC_AUTH_TOKEN=<gateway-token>
-                    claude --bare -p --output-format json 'Reply exactly SMOKEOK.'
-                    """)
+                    MBReadOnlyField(value: model.connectionCheckCommand)
                 }
             }
         }
@@ -516,7 +511,7 @@ private struct UpstreamSettingsTab: View {
                 return "Saved effort \(route.reasoningEffort.isEmpty ? "(none)" : route.reasoningEffort) is unavailable. Choose a supported reasoning effort."
             }
         }
-        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } + [ModelRoute(upstreamModel: model.fableRouteDraft.upstreamModel, reasoningEffort: model.fableRouteDraft.effort, textVerbosity: model.fableRouteDraft.verbosity)] : []) + [route])
+        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } + [ModelRoute(upstreamModel: model.fableRouteDraft.upstreamModel, reasoningEffort: model.fableRouteDraft.effort, textVerbosity: model.fableRouteDraft.verbosity)] : []) + [route, ModelRoute(upstreamModel: model.advisorRouteDraft.upstreamModel, reasoningEffort: model.advisorRouteDraft.effort, textVerbosity: model.advisorRouteDraft.verbosity)])
     }
     var body: some View {
         ScrollViewReader { proxy in
@@ -589,6 +584,10 @@ private struct UpstreamSettingsTab: View {
                         }
                     }
                 }.padding(.vertical, 12)
+            }
+            MBSection(title: "Advisor") {
+                AdvisorRouteRow(draft: $model.advisorRouteDraft).environmentObject(model)
+                    .padding(.vertical, 12)
             }
             if model.statusText.hasPrefix("Failed") { Text(model.statusText).foregroundStyle(MBColor.faultInk).padding(.bottom, 12) }
             if model.showConnectionInstructions && model.daemonIsRunning {
@@ -946,7 +945,7 @@ private struct DiagnosticsSettingsTab: View {
         ) {
             kpiCard(label: "Requests", value: "\(model.recentRequestCount)",
                     detail: "\(model.formattedRequestsPerMinute) / min")
-            kpiCard(label: "Success", value: model.recentRequestCount == 0 ? "—" : percentString(model.successRate),
+            kpiCard(label: "Success", value: model.recentSuccessCount + model.recentFailureCount == 0 ? "—" : percentString(model.successRate),
                     detail: "\(model.recentSuccessCount) ok · \(model.recentFailureCount) err",
                     tone: model.recentFailureCount > 0 ? .warn : .live)
             kpiCard(label: "Last latency", value: model.lastLatencyMilliseconds.map { "\($0) ms" } ?? "—",
@@ -1089,10 +1088,38 @@ private struct MappingRouteRow: View {
     }
 }
 
+private struct AdvisorRouteRow: View {
+    @Binding var draft: RouteDraft
+    @EnvironmentObject private var model: AppModel
+    private var selected: SIWCModelSummary? { model.availableChatGPTModels.first { $0.id == draft.upstreamModel } }
+    private var efforts: [String] { selected?.scalarReasoningEfforts ?? [] }
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Model").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                Picker("Advisor Model", selection: $draft.upstreamModel) {
+                    if selected == nil { Text("Unavailable: " + draft.upstreamModel).tag(draft.upstreamModel).disabled(true) }
+                    ForEach(model.availableChatGPTModels) { item in Text(item.label).tag(item.id) }
+                }.labelsHidden().disabled(!model.modelCatalogUsable)
+                    .onChange(of: draft.upstreamModel) { _, _ in
+                        if !efforts.contains(draft.effort) { draft.effort = "" }
+                    }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Effort").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                Picker("Advisor Effort", selection: $draft.effort) {
+                    if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose" : "Unavailable").tag(draft.effort).disabled(true) }
+                    ForEach(efforts, id: \.self) { Text($0).tag($0) }
+                }.labelsHidden().disabled(!model.modelCatalogUsable || efforts.isEmpty)
+            }.frame(width: 100, alignment: .leading)
+        }
+    }
+}
+
 private struct SelectedModelHints: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) + [model.fableRouteDraft.upstreamModel] : []) + [model.fallbackRouteDraft.upstreamModel])
+        let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) + [model.fableRouteDraft.upstreamModel] : []) + [model.fallbackRouteDraft.upstreamModel, model.advisorRouteDraft.upstreamModel])
         VStack(alignment: .leading, spacing: 7) {
             ForEach(model.availableChatGPTModels.filter { ids.contains($0.id) }) { item in
                 Text(item.label + " · supported effort: " + item.scalarReasoningEfforts.joined(separator: ", "))

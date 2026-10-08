@@ -40,7 +40,7 @@ struct ClaudexTests {
 
         let configuration = store.loadOrCreate()
 
-        #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_BASE_URL=http://127.0.0.1:4317"))
-        #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_AUTH_TOKEN=env-token"))
+        #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_BASE_URL='http://127.0.0.1:4317'"))
+        #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_AUTH_TOKEN='env-token'"))
     }
 }

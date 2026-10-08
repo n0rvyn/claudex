@@ -10,7 +10,7 @@ struct SettingsTokenStatusTests {
     @Test
     func refreshTokenNowSetsBusyFlagDuringRefreshAndClearsAfter() async throws {
         let refresher = BlockingMockRefresher()
-        let model = AppModel(subscriptionRefresherFactory: { _, _ in refresher }, automaticallyLoadCatalog: false)
+        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), subscriptionRefresherFactory: { _, _ in refresher }, automaticallyLoadCatalog: false)
 
         #expect(model.isRefreshingToken == false)
 
@@ -33,7 +33,7 @@ struct SettingsTokenStatusTests {
     func refreshFailureSetsTokenRefreshError() async {
         let failure = MockRefresherError.refreshFailed
         let refresher = BlockingMockRefresher(errorToThrow: failure)
-        let model = AppModel(subscriptionRefresherFactory: { _, _ in refresher }, automaticallyLoadCatalog: false)
+        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), subscriptionRefresherFactory: { _, _ in refresher }, automaticallyLoadCatalog: false)
 
         Task {
             try? await Task.sleep(for: .milliseconds(10))
@@ -49,14 +49,14 @@ struct SettingsTokenStatusTests {
     @Test
     func refreshTokenNowClearsPreviousErrorAtEntry() async throws {
         let firstFailure = BlockingMockRefresher(errorToThrow: MockRefresherError.refreshFailed)
-        let model = AppModel(subscriptionRefresherFactory: { _, _ in firstFailure }, automaticallyLoadCatalog: false)
+        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), subscriptionRefresherFactory: { _, _ in firstFailure }, automaticallyLoadCatalog: false)
 
         Task { await firstFailure.release() }
         await model.refreshTokenNow()
         #expect(model.tokenRefreshError != nil)
 
         let secondRefresher = BlockingMockRefresher()
-        let secondModel = AppModel(subscriptionRefresherFactory: { _, _ in secondRefresher }, automaticallyLoadCatalog: false)
+        let secondModel = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), subscriptionRefresherFactory: { _, _ in secondRefresher }, automaticallyLoadCatalog: false)
         secondModel.tokenRefreshError = "stale error"
 
         let refreshTask = Task { await secondModel.refreshTokenNow() }
@@ -74,7 +74,7 @@ struct SettingsTokenStatusTests {
 
     @Test
     func startTokenStatusPollingExitsOnCancellation() async throws {
-        let model = AppModel(automaticallyLoadCatalog: false)
+        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), subscriptionRefresherFactory: { _, _ in BlockingMockRefresher() }, automaticallyLoadCatalog: false)
         let pollTask = Task { await model.startTokenStatusPolling() }
 
         try await Task.sleep(for: .milliseconds(50))

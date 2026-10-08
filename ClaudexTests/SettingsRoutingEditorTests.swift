@@ -37,7 +37,6 @@ struct SettingsRoutingEditorTests {
     func editRuleKeywordUpdatesDraft() {
         let model = AppModelTestHelper.makeSUT()
         model.addRoutingRule()
-        let ruleID = model.routingRulesDraft.last!.id
 
         model.routingRulesDraft[0].keyword = "opus"
         #expect(model.routingRulesDraft.first?.keyword == "opus")
@@ -124,7 +123,7 @@ struct SettingsRoutingEditorTests {
 
     @Test func unavailableSavedModelCannotBeSavedOrReplacedAutomatically() async {
         let store = InMemoryConfigurationStore(initial: .defaultTestConfig())
-        let model = AppModel(configurationStore: store, automaticallyLoadCatalog: false)
+        let model = AppModel(configurationStore: store, automaticallyLoadCatalog: false, offlinePreview: true)
         AppModelTestHelper.installCatalog(on: model)
         model.fallbackRouteDraft.upstreamModel = "retired-fixture"
         await model.saveRoutingAndApply()
@@ -154,7 +153,7 @@ struct SettingsRoutingEditorTests {
             routingUpdateApplier: { [recorder] table, advisor in
                 await recorder.record(table: table, advisor: advisor)
             },
-            automaticallyLoadCatalog: false
+            automaticallyLoadCatalog: false, offlinePreview: true
         )
 
         AppModelTestHelper.installCatalog(on: model)
@@ -178,6 +177,25 @@ struct SettingsRoutingEditorTests {
     }
 
     @Test
+    func advisorAutosaveKeepsIndependentFixedEffort() async throws {
+        let store = InMemoryConfigurationStore(initial: .defaultTestConfig())
+        let recorder = RoutingApplierRecorder()
+        let model = AppModel(configurationStore: store, routingUpdateApplier: { table, advisor in
+            await recorder.record(table: table, advisor: advisor)
+        }, automaticallyLoadCatalog: false, offlinePreview: true)
+        AppModelTestHelper.installCatalog(on: model)
+        model.enableMappingAutosave()
+        model.allowClaudeAdjustment = true
+        model.fallbackRouteDraft.effort = "high"
+        model.advisorRouteDraft = RouteDraft(upstreamModel: "gpt-5.4-mini", effort: "low", verbosity: "medium")
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(store.saveCallCount == 1)
+        #expect(model.currentConfiguration.advisorRoute.upstreamModel == "gpt-5.4-mini")
+        #expect(model.currentConfiguration.advisorRoute.reasoningEffort == "low")
+        #expect(await recorder.lastApplied?.advisor.reasoningEffort == "low")
+    }
+
+    @Test
     func saveRoutingAndApplyRejectsEmptyKeyword() async {
         let store = InMemoryConfigurationStore(initial: .defaultTestConfig())
         let recorder = RoutingApplierRecorder()
@@ -187,7 +205,7 @@ struct SettingsRoutingEditorTests {
             routingUpdateApplier: { [recorder] table, advisor in
                 await recorder.record(table: table, advisor: advisor)
             },
-            automaticallyLoadCatalog: false
+            automaticallyLoadCatalog: false, offlinePreview: true
         )
 
         model.addRoutingRule()
@@ -218,7 +236,7 @@ enum AppModelTestHelper {
         model.availableChatGPTModels = models
     }
     static func makeSUT() -> AppModel {
-        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), automaticallyLoadCatalog: false)
+        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), automaticallyLoadCatalog: false, offlinePreview: true)
         installCatalog(on: model)
         return model
     }
@@ -226,7 +244,7 @@ enum AppModelTestHelper {
 
 // MARK: - Test doubles for save integration
 
-private extension RouterConfiguration {
+extension RouterConfiguration {
     static func defaultTestConfig() -> RouterConfiguration {
         let fallback = ModelRoute(upstreamModel: "gpt-5.4", reasoningEffort: "medium", textVerbosity: "medium")
         let advisor = ModelRoute(upstreamModel: "gpt-5.4", reasoningEffort: "medium", textVerbosity: "medium")

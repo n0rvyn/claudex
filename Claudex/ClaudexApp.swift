@@ -6,6 +6,9 @@ struct ClaudexApp: App {
     @StateObject private var model: AppModel
     init() {
         #if DEBUG
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil || NSClassFromString("XCTestCase") != nil {
+            _model = StateObject(wrappedValue: AppModel.visualFixture("connected")); return
+        }
         if let state = ProcessInfo.processInfo.environment["CLAUDEX_UI_FIXTURE"] {
             _model = StateObject(wrappedValue: AppModel.visualFixture(state)); return
         }

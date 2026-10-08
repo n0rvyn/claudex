@@ -84,6 +84,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var configurationWarning: String?
     @Published private(set) var subscriptionAuthFilePath = ""
     @Published private(set) var envSnippet = ""
+    @Published private(set) var connectionCheckCommand = ""
     @Published private(set) var tracePath = UserHomeResolver.defaultTraceLogFilePath()
     @Published private(set) var recentTraceLines: [String] = []
     @Published private(set) var doctorNotes: [String] = []
@@ -91,6 +92,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var recentFunctionCallNames: [String] = []
     @Published private(set) var recentConnectorNames: [String] = []
     @Published private(set) var recentRejectedPaths: [String] = []
+    @Published private(set) var activeRequestCount: Int?
+    @Published private(set) var traffic: SIWCTrafficSnapshot?
     @Published private(set) var recentRequestCount = 0
     @Published private(set) var recentSuccessCount = 0
     @Published private(set) var recentFailureCount = 0
@@ -113,6 +116,7 @@ final class AppModel: ObservableObject {
     @Published var routingRulesDraft: [RoutingRuleDraft] = []
     @Published var fableRouteDraft: RouteDraft
     @Published var fallbackRouteDraft: RouteDraft
+    @Published var settingsTab: SettingsTab = .upstream
     @Published var advisorRouteDraft: RouteDraft
     @Published var useAdvancedRouting = false
     @Published var allowClaudeAdjustment = false
@@ -171,7 +175,7 @@ final class AppModel: ObservableObject {
             verbosity: configuration.advisorRoute.textVerbosity
         )
         self.subscriptionAuthBookmarkDataDraft = configuration.subscriptionAuthBookmarkData
-        self.daemon = GatewayDaemon(configuration: configuration)
+        self.daemon = GatewayDaemon(configuration: configuration, auth: subscriptionRefresherFactory(URL(fileURLWithPath: configuration.subscriptionAuthFilePath), configuration.subscriptionAuthBookmarkData))
         applyConfigurationStatus(configuration)
         syncDrafts(configuration)
         if offlinePreview { return }
@@ -326,8 +330,9 @@ final class AppModel: ObservableObject {
     }
 
     var errorRate: Double {
-        guard recentRequestCount > 0 else { return 0 }
-        return Double(recentFailureCount) / Double(recentRequestCount)
+        let completed = recentSuccessCount + recentFailureCount
+        guard completed > 0 else { return 0 }
+        return Double(recentFailureCount) / Double(completed)
     }
 
     var successRate: Double { 1 - errorRate }
@@ -453,7 +458,7 @@ final class AppModel: ObservableObject {
         }
         Task {
             await daemon.stop()
-            daemon = GatewayDaemon(configuration: currentConfiguration)
+            daemon = GatewayDaemon(configuration: currentConfiguration, auth: subscriptionRefresherFactory(URL(fileURLWithPath: currentConfiguration.subscriptionAuthFilePath), currentConfiguration.subscriptionAuthBookmarkData))
             do {
                 try await daemon.start()
                 await refreshSnapshot(runningText: "Claudex daemon restarted")
@@ -673,6 +678,7 @@ final class AppModel: ObservableObject {
             $routingRulesDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $fableRouteDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $fallbackRouteDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $advisorRouteDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $useAdvancedRouting.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $allowClaudeAdjustment.dropFirst().map { _ in () }.eraseToAnyPublisher()
         ]).sink { [weak self] in
@@ -739,14 +745,14 @@ final class AppModel: ObservableObject {
             allowClientEffort: allowClaudeAdjustment,
             fableRoute: ModelRoute(upstreamModel: fableRouteDraft.upstreamModel, reasoningEffort: fableRouteDraft.effort, textVerbosity: fableRouteDraft.verbosity)
         )
-        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) + [table.effectiveFableRoute] : []) + [table.fallback]) {
-            routingSaveError = error; statusText = error; return
-        }
-        let advisor = onlyRouting ? currentConfiguration.advisorRoute : ModelRoute(
+        let advisor = ModelRoute(
             upstreamModel: advisorRouteDraft.upstreamModel,
             reasoningEffort: advisorRouteDraft.effort,
             textVerbosity: advisorRouteDraft.verbosity
         )
+        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) + [table.effectiveFableRoute] : []) + [table.fallback] + (advisor == currentConfiguration.advisorRoute ? [] : [advisor])) {
+            routingSaveError = error; statusText = error; return
+        }
 
         let saved: RouterConfiguration
         do { saved = try configurationStore.saveVerified(
@@ -942,7 +948,7 @@ final class AppModel: ObservableObject {
         }
         currentConfiguration = configuration
         applyConfigurationStatus(configuration)
-        daemon = GatewayDaemon(configuration: configuration)
+        daemon = GatewayDaemon(configuration: configuration, auth: subscriptionRefresherFactory(URL(fileURLWithPath: configuration.subscriptionAuthFilePath), configuration.subscriptionAuthBookmarkData))
         if restartIfRunning {
             do {
                 try await daemon.start()
@@ -980,6 +986,19 @@ final class AppModel: ObservableObject {
         p95LatencyMilliseconds = snapshot.traceDiagnostics.p95LatencyMilliseconds
         recentErrorReasons = snapshot.traceDiagnostics.recentErrorReasons
         doctorSnapshot = snapshot
+        activeRequestCount = snapshot.pendingToolTurnsCount
+        traffic = snapshot.traffic
+        if let traffic {
+            recentRequestCount = traffic.requests
+            recentSuccessCount = traffic.successes
+            recentFailureCount = traffic.errors
+            lastRequestOutcome = traffic.lastOutcome ?? "No completed request"
+            p50LatencyMilliseconds = traffic.p50LatencyMilliseconds
+            p95LatencyMilliseconds = traffic.p95LatencyMilliseconds
+            requestsPerMinute = Double(traffic.requests) / 5
+            lastLatencyMilliseconds = traffic.lastLatencyMilliseconds
+            recentErrorReasons = traffic.lastError.map { [$0] } ?? []
+        }
         if snapshot.chatGPTAuthenticated {
             authText = "ChatGPT auth ready (\(snapshot.accountIDSuffix ?? "unknown"))"
         } else {
@@ -992,6 +1011,7 @@ final class AppModel: ObservableObject {
         currentConfiguration = configuration
         endpoint = configuration.endpoint
         envSnippet = configuration.claudeEnvironmentSnippet
+        connectionCheckCommand = configuration.claudeConnectionCheckCommand
         configurationPath = configuration.configurationPath
         configurationWarning = configuration.configurationWarning
         subscriptionAuthFilePath = configuration.subscriptionAuthFilePath
@@ -1137,12 +1157,13 @@ private final class PreviewConfigurationStore: ConfigurationStoring {
 }
 
 extension AppModel {
-    static func visualFixture(_ state: String, storeFactory: ((RouterConfiguration) -> any ConfigurationStoring)? = nil) -> AppModel {
+    static func visualFixture(_ state: String, traffic: SIWCTrafficSnapshot? = nil, storeFactory: ((RouterConfiguration) -> any ConfigurationStoring)? = nil) -> AppModel {
         let route = ModelRoute(upstreamModel: state == "retired" ? "retired-model" : "gpt-6-luna", reasoningEffort: state == "unsupported" ? "ultra" : "low", textVerbosity: "low")
         let config = RouterConfiguration(host: "127.0.0.1", port: 4317, healthPath: "/health", messagesPath: "/v1/messages", countTokensPath: "/v1/messages/count_tokens", responsesURL: "https://api.openai.com/v1/responses", routingTable: ModelRoutingTable(rules: [], fallback: route, singleModelMode: false), advisorRoute: route, gatewayAuthToken: "fixture-only-not-a-credential", gatewayAuthHeader: "x-mb-token", subscriptionAuthFilePath: "/tmp/claudex-ui/fixture-auth-unused", configurationPath: "/tmp/claudex-ui/fixture-config-unused", configurationWarning: nil)
         let catalog = SIWCModelCatalog(directory: URL(fileURLWithPath: "/tmp/claudex-ui/catalog-fixture"), loader: { throw SIWCError.remote("Fixture catalog unavailable. Try refreshing.") })
         let model = AppModel(configurationStore: storeFactory?(config) ?? PreviewConfigurationStore(config), modelCatalog: catalog, automaticallyLoadCatalog: false, offlinePreview: true)
         model.tracePath = "/tmp/claudex-ui/fixture-trace-unused"
+        model.traffic = traffic
         model.authState = .ready; model.authText = "ChatGPT connected"; model.statusText = "Gateway paused"
         model.chatGPTAccounts = [SIWCAccountSummary(id: "demo-account", label: "Alex · Personal workspace", clientID: "fixture-client", active: true, authorized: true)]
         var json = """
@@ -1160,7 +1181,8 @@ extension AppModel {
         case "authError": model.chatGPTAccounts = []; model.authState = .authorizationRequired; model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.signInError = "Connection was interrupted. Connect ChatGPT to try again."
         case "loading": model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.isLoadingModelCatalog = true
         case "catalogError", "switched": model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.modelCatalogError = "Could not load models for this account. Refresh to try again."
-        case "running": model.daemonState = "running"; model.statusText = "Gateway running"; model.showConnectionInstructions = true
+        case "running": model.daemonState = "running"; model.statusText = "Gateway running"; model.activeRequestCount = 1
+        case "idle": model.daemonState = "running"; model.statusText = "Gateway running"; model.activeRequestCount = 0
         case "gatewayError": model.statusText = "Failed to start gateway: port 4317 is already in use. Pause the other gateway or change the port in Gateway settings."
         default: break
         }
@@ -1171,63 +1193,121 @@ extension AppModel {
 
 // MARK: - Menu bar popover
 
+struct RecordedRequestTrend: Equatable {
+    init(buckets: [Int], available: Bool) { self.buckets = buckets; self.available = available }
+    let buckets: [Int]
+    let available: Bool
+}
+
 struct ContentView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
+    private var trend: RecordedRequestTrend { RecordedRequestTrend(buckets: model.traffic?.buckets ?? Array(repeating: 0, count: 5), available: model.traffic != nil) }
+    private var trafficWindow: String {
+        guard let start = model.traffic?.startedAt, Date().timeIntervalSince(start) < 300 else { return "Last 5 min" }
+        return "Since " + start.formatted(date: .omitted, time: .shortened)
+    }
+    private func number(_ value: Int) -> String { value.formatted(.number.notation(.compactName)) }
+    private var error: String? {
+        if let value = model.signInError ?? model.tokenRefreshError ?? model.doctorSnapshot?.authError { return value }
+        if model.statusText.hasPrefix("Failed") { return model.statusText }
+        if !model.isUpstreamReady { return model.isSigningIn ? "Connecting ChatGPT…" : "ChatGPT connection needed" }
+        if !model.daemonIsRunning, let value = model.savedRoutingCatalogError { return value }
+        return nil
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                MBBridgeBadge(size: 32)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Claudex").font(MBFont.title)
-                    Label(model.daemonIsRunning ? "Gateway running" : "Gateway paused", systemImage: model.daemonIsRunning ? "circle.fill" : "pause.circle")
-                        .font(MBFont.caption).foregroundStyle(model.daemonIsRunning ? MBColor.liveInk : MBColor.inkDim)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                MBDot(state: error != nil ? .fault : (model.daemonIsRunning ? .live : .idle), size: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.daemonIsRunning ? "Gateway running" : "Gateway paused").font(.system(size: 13, weight: .semibold))
+                    Text(model.activeRequestCount.map { $0 == 0 ? "Idle" : "\($0) active request\($0 == 1 ? "" : "s")" } ?? (model.daemonIsRunning ? "Active requests unavailable" : "Idle"))
+                        .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 Button(model.daemonIsRunning ? "Pause" : "Start") { model.toggleDaemon() }
-                    .buttonStyle(.borderedProminent).disabled(!model.canStartDaemon)
+                    .buttonStyle(.bordered).controlSize(.small).disabled(!model.canStartDaemon)
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.circle")
+                    .font(MBFont.caption).foregroundStyle(MBColor.faultInk).lineLimit(2).help(error)
+            } else if let recordedError = model.recentErrorReasons.first {
+                Text("Last recorded error: " + recordedError).font(MBFont.caption)
+                    .foregroundStyle(MBColor.warnInk).lineLimit(2).help(recordedError)
             }
             Divider()
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Claude Code → ChatGPT").font(MBFont.labelB)
-                Text(model.currentConfiguration.executorModel + " · " + model.currentConfiguration.routingTable.fallback.reasoningEffort)
-                    .font(MBFont.mono).textSelection(.enabled)
-                Text(model.chatGPTAccounts.first(where: { $0.active && $0.authorized })?.label ?? "Connect your ChatGPT account")
-                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim).lineLimit(2)
+            HStack {
+                Text("Requests/min").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                Spacer()
+                Text(trafficWindow).font(MBFont.caption).foregroundStyle(MBColor.inkFaint)
             }
-            if model.isSigningIn {
-                HStack { ProgressView().controlSize(.small); Text("Finish connecting in your browser"); Button("Cancel") { model.cancelChatGPTSignIn() } }
-            } else if !model.isUpstreamReady {
-                Button("Connect ChatGPT") { model.beginChatGPTSignIn() }.buttonStyle(.borderedProminent)
+            RequestTrendLine(trend: trend).frame(height: 35)
+            HStack(alignment: .top, spacing: 12) {
+                PanelMetric(label: "Requests", value: model.traffic.map { number($0.requests) } ?? "—")
+                PanelMetric(label: "Tokens", value: model.traffic.map { $0.usageReported ? number($0.inputTokens + $0.outputTokens) + ($0.usageIncomplete ? "+" : "") : "—" } ?? "—")
+                    .help("Provider-reported input + output tokens in this window. Includes Advisor; + means some calls did not report usage. Not remaining plan quota.")
+                PanelMetric(label: "Errors", value: model.traffic.map { number($0.errors) } ?? "—", warning: (model.traffic?.errors ?? 0) > 0)
             }
-            if let error = model.signInError ?? model.savedRoutingCatalogError {
-                Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).fixedSize(horizontal: false, vertical: true)
-                SettingsLink { Text("Review account & model") }
+            if let traffic = model.traffic {
+                HStack {
+                    Text("\(traffic.modelCalls) model calls")
+                    Spacer()
+                    if traffic.advisorTokens > 0 { Text("Advisor · " + number(traffic.advisorTokens) + " tokens") }
+                    else if let latency = traffic.lastLatencyMilliseconds { Text("Last · " + (Double(latency) / 1000).formatted(.number.precision(.fractionLength(1))) + " s") }
+                }.font(MBFont.caption).foregroundStyle(MBColor.inkDim).monospacedDigit()
             }
-            if model.statusText.hasPrefix("Failed") { Text(model.statusText).foregroundStyle(MBColor.faultInk).font(MBFont.caption) }
-            if model.showConnectionInstructions && model.daemonIsRunning {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Connect Claude Code").font(MBFont.labelB)
-                    Text("Copy the two exports into your terminal, then launch Claude Code. Requests use your plan.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                    HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }
+            HStack {
+                Spacer(minLength: 0)
+                Button { model.settingsTab = .diagnostics; openSettings() } label: {
+                    Label("Activity", systemImage: "waveform.path")
                 }
-            }
-            HStack {
-                MBKpi(label: "Requests", value: "\(model.recentRequestCount)")
-                Spacer()
-                MBKpi(label: "Failures", value: "\(model.recentFailureCount)")
-                Spacer()
-                MBKpi(label: "Last latency", value: model.lastLatencyMilliseconds.map { "\($0) ms" } ?? "—")
-            }
-            Text(model.recentRequestCount == 0 ? "No requests yet" : model.lastRequestOutcome).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-            Divider()
-            HStack {
-                SettingsLink { Label("Settings", systemImage: "gearshape") }
-                Spacer()
-                Button("Copy connection") { model.copyEnvSnippet() }.disabled(!model.isUpstreamReady)
-                Button("Quit") { model.quit() }
-            }.buttonStyle(.borderless)
+                Button { model.settingsTab = .upstream; openSettings() } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+            }.buttonStyle(.borderless).controlSize(.small).font(MBFont.caption)
         }
-        .font(MBFont.label).tint(MBColor.brand).accentColor(MBColor.brand).padding(18).frame(width: 400).background(MBColor.paper).tint(MBColor.brand)
+        .font(MBFont.label).tint(MBColor.brand).padding(14).frame(width: 340).background(MBColor.paper)
+    }
+}
+
+private struct PanelMetric: View {
+    let label: String
+    let value: String
+    var warning = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(.system(size: 15, weight: .medium)).monospacedDigit()
+                .foregroundStyle(warning ? MBColor.warnInk : MBColor.ink)
+            Text(label).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct RequestTrendLine: View {
+    let trend: RecordedRequestTrend
+    var body: some View {
+        if !trend.available {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.xyaxis.line").foregroundStyle(MBColor.inkFaint)
+                Text("Trend unavailable · no request timestamps").font(MBFont.caption).foregroundStyle(MBColor.inkFaint)
+                Spacer()
+            }
+        } else {
+            GeometryReader { geometry in
+                let maximum = max(1, trend.buckets.max() ?? 1)
+                Path { path in
+                    for (index, count) in trend.buckets.enumerated() {
+                        let point = CGPoint(x: CGFloat(index) * max(0, geometry.size.width - 80) / 4,
+                            y: geometry.size.height - 2 - CGFloat(count) / CGFloat(maximum) * (geometry.size.height - 4))
+                        if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                    }
+                }.stroke(MBColor.brand.opacity(0.65), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                HStack {
+                    Spacer()
+                    Text("Peak \(trend.buckets.max() ?? 0)/min").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                }
+            }.accessibilityLabel("Recorded requests per minute over the last five minutes: " + trend.buckets.map(String.init).joined(separator: ", "))
+        }
     }
 }
 
