@@ -66,6 +66,7 @@ enum ClassifierDiagnostics {
             "session_header_present": .bool(request.headers["x-claude-code-session-id"] != nil),
             "thinking_present": .bool(object["thinking"] != nil),
             "output_format_present": .bool(output["format"] != nil),
+            "stream_field_present": .bool(object["stream"] != nil),
             "stream_requested": .bool(object["stream"] as? Bool ?? false)
         ])
     }
@@ -80,7 +81,8 @@ enum ClassifierDiagnostics {
 
     static func responseFields(_ response: HTTPResponse) -> JSONObject {
         var result = JSONObject.from(["event": .string("gateway_response"), "status": .number(Double(response.statusCode)),
-            "review_header_present": .bool(reviewPresence(response.headers))])
+            "review_header_present": .bool(reviewPresence(response.headers)),
+            "response_mode": .string(response.bodyData == nil ? "stream" : "buffered")])
         if let data = response.bodyData,
            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             result["review_field_present"] = .bool(reviewPresence(object))

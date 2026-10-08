@@ -125,7 +125,9 @@ public actor SIWCBridge {
                 } else { stream = initial }
             }
             catch { inflight.removeValue(forKey: key); throw error }
-            if input.stream == false {
+            // Anthropic Messages defaults to a buffered Message when stream is omitted.
+            // Claude Code's classifier fallback omits it and parses JSON, not SSE.
+            if input.stream != true {
                 let writer = SIWCCollectingWriter()
                 do {
                     let blocks = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, allowedTools: allowedTools, beforeFinish: { [self, route] blocks in

@@ -78,6 +78,74 @@ struct SIWCBridgeTests {
         JSONObject.from(["type": .string("function_call"), "id": .string(itemID), "call_id": .string(id),
             "namespace": .string("claude"), "name": .string(name), "arguments": .string(arguments)])
     }
+    // Captured owner requests omitted stream, used the Messages endpoint and
+    // session header, and received SSE despite the SDK expecting a JSON Message.
+    @Test func omittedStreamDefaultsToJSONAndPreservesClassifierRejection() async throws {
+        let rejection = #"{"decision":"reject","reason":"fixture unsafe action"}"#
+        let client = SIWCFixtureClient([[done(message(rejection)), completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let body = #"{"model":"claude-sonnet-5-5","messages":[{"role":"user","content":"Assess fixture action"}]}"#
+        let response = await bridge.handleMessages(HTTPRequest(method: "POST", path: "/v1/messages", headers: ["x-claude-code-session-id": "classifier-fixture"], body: Data(body.utf8)))
+        #expect(response.statusCode == 200)
+        #expect(response.headers["Content-Type"]?.contains("application/json") == true)
+        guard let data = response.bodyData else { Issue.record("Omitted stream must produce a buffered Message, not SSE"); return }
+        let json = try JSONDecoder().decode(JSONObject.self, from: data)
+        #expect(json.string("type") == "message")
+        #expect(json.string("stop_reason") == "end_turn")
+        #expect(json.array("content")?.first?.objectValue?.string("text") == rejection)
+        #expect(await client.calls == 1)
+    }
+
+    @Test func explicitStreamFalseReturnsJSONWhileTrueRemainsSSE() async throws {
+        for stream in [false, true] {
+            let client = SIWCFixtureClient([[done(message("fixture response")), completed]])
+            let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+            let body = "{\"model\":\"claude-sonnet-5-5\",\"stream\":\(stream),\"messages\":[{\"role\":\"user\",\"content\":\"fixture\"}]}"
+            let response = await bridge.handleMessages(HTTPRequest(method: "POST", path: "/v1/messages", headers: ["x-claude-code-session-id": "mode-fixture"], body: Data(body.utf8)))
+            #expect(response.statusCode == 200)
+            if stream {
+                #expect(response.bodyData == nil)
+                #expect(response.headers["Content-Type"] == "text/event-stream")
+                let writer = SIWCFixtureWriter()
+                try await consume(response, writer)
+                #expect(await writer.text.contains("message_stop"))
+            } else {
+                #expect(response.bodyData != nil)
+                #expect(response.headers["Content-Type"]?.contains("application/json") == true)
+            }
+        }
+    }
+
+    @Test func omittedStreamFailureDoesNotProduceAnAllowVerdict() async throws {
+        let client = SIWCFixtureClient([[JSONObject.from(["type": .string("response.failed")])]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let body = #"{"model":"claude-sonnet-5-5","messages":[{"role":"user","content":"Assess fixture action"}]}"#
+        let response = await bridge.handleMessages(HTTPRequest(method: "POST", path: "/v1/messages", headers: ["x-claude-code-session-id": "classifier-failure-fixture"], body: Data(body.utf8)))
+        #expect(response.statusCode >= 400)
+        guard let data = response.bodyData else { Issue.record("Expected error envelope"); return }
+        let json = try JSONDecoder().decode(JSONObject.self, from: data)
+        #expect(json.object("error") != nil)
+        #expect(json["content"] == nil)
+        #expect(!String(decoding: data, as: UTF8.self).contains("\"allow\""))
+    }
+
+    @Test func sendMessageRecipientAndSchemaAreNotSilentlyRewritten() async throws {
+        let tools = #"[{"name":"SendMessage","description":"Send to a bare teammate name","input_schema":{"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"}},"required":["to","message"]}}]"#
+        let arguments = #"{"to":"fixture-worker@fixture-team","message":"fixture message"}"#
+        let client = SIWCFixtureClient([[done(call("send-fixture", itemID: "send-item", name: "SendMessage", arguments: arguments)), completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let response = await bridge.handleMessages(request(#"[{"role":"user","content":"Use fixture SendMessage"}]"#, tools: tools))
+        let writer = SIWCFixtureWriter()
+        try await consume(response, writer)
+        let output = await writer.text
+        #expect(output.contains("fixture-worker@fixture-team"))
+        let payload = await client.payload(0)
+        let function = payload.array("tools")?.first?.objectValue?.array("tools")?.first?.objectValue
+        let original = try JSONDecoder().decode([JSONObject].self, from: Data(tools.utf8))[0]
+        #expect(function?.object("parameters") == original.object("input_schema"))
+        #expect(function?.string("description") == original.string("description"))
+    }
+
     @Test func requestContractIsNamespacedAndStateless() throws {
         let input = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: request(#"[{"role":"user","content":"hello"}]"#).body)
         let payload = try SIWCBridge.payload(input, route: Self.route)
