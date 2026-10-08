@@ -239,6 +239,32 @@ struct ResponsesClientStreamingTests {
         // the consumer loop exited cleanly here.
         #expect(firstEvent?.string("type") == "ev_0")
     }
+    @Test func byteParserPreservesEmptyFrameDelimitersAndLineEndings() async throws {
+        for newline in ["\n", "\r\n", "\r"] {
+            let source = "\u{FEFF}data: {\"type\":\"one\"}" + newline + newline
+                + "data: {" + newline + "data: \"type\":\"two\"}" + newline + newline
+                + "data: [DONE]" + newline + newline
+            let bytes = AsyncStream<UInt8> { c in
+                for byte in source.utf8 { c.yield(byte) }; c.finish()
+            }
+            var types: [String] = []
+            for try await event in ResponsesClient.parseStrictSSEBytes(bytes) {
+                types.append(event.string("type") ?? "")
+            }
+            #expect(types == ["one", "two"])
+        }
+    }
+    @Test func byteParserRejectsTruncatedFrameAndInvalidUTF8() async throws {
+        for source in [Array("data: {\"type\":\"one\"}\n".utf8), [UInt8(255), 10, 10]] {
+            let bytes = AsyncStream<UInt8> { c in
+                for byte in source { c.yield(byte) }; c.finish()
+            }
+            await #expect(throws: (any Error).self) {
+                for try await _ in ResponsesClient.parseStrictSSEBytes(bytes) {}
+            }
+        }
+    }
+
     @Test func strictParserSupportsMultilineData() async throws {
         let lines = ["event: response.completed", "data: {", #"data: "type":"response.completed"}"#, ""]
         var events: [JSONObject] = []

@@ -64,10 +64,55 @@ public actor ResponsesClient {
 
         let upstream = bytes.task
         activeRequests[requestID] = upstream
-        return Self.parseStrictSSELines(bytes.lines, onTermination: { [self] in
+        return Self.parseStrictSSEBytes(bytes, onTermination: { [self] in
             upstream.cancel()
             Task { await removeRequest(requestID) }
         })
+    }
+
+    /// Foundation AsyncBytes.lines drops empty lines on macOS. SSE frame boundaries
+    /// therefore must be decoded from bytes rather than that convenience sequence.
+    internal static func parseStrictSSEBytes<S: AsyncSequence & Sendable>(_ bytes: S,
+        onTermination: @escaping @Sendable () -> Void = {}) -> AsyncThrowingStream<JSONObject, Error>
+        where S.Element == UInt8 {
+        let lines = AsyncThrowingStream<String, Error> { continuation in
+            let task = Task {
+                var buffer = Data()
+                var afterCR = false
+                var firstLine = true
+                func emitLine() throws {
+                    guard var line = String(data: buffer, encoding: .utf8) else {
+                        throw SIWCError.remote("invalid_sse_utf8")
+                    }
+                    if firstLine, line.hasPrefix("\u{FEFF}") { line.removeFirst() }
+                    firstLine = false
+                    buffer.removeAll(keepingCapacity: true)
+                    continuation.yield(line)
+                }
+                do {
+                    for try await byte in bytes {
+                        try Task.checkCancellation()
+                        if byte == 10 {
+                            if !afterCR { try emitLine() }
+                            afterCR = false
+                        } else if byte == 13 {
+                            try emitLine()
+                            afterCR = true
+                        } else {
+                            afterCR = false
+                            buffer.append(byte)
+                            guard buffer.count <= 16 * 1024 * 1024 else {
+                                throw SIWCError.remote("sse_line_too_large")
+                            }
+                        }
+                    }
+                    if !buffer.isEmpty { try emitLine() }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        return parseStrictSSELines(lines, onTermination: onTermination)
     }
 
     /// Parse complete SSE frames; malformed JSON and truncated frames fail closed.
