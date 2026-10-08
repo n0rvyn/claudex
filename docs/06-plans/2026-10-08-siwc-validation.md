@@ -14,7 +14,7 @@ Baseline: `dev` at `e4b29ca768029fef134d67a1e2c23fe1b8a75d16`. User authorized t
 
 ## Evidence
 
-`swift test --scratch-path /tmp/ClaudexSIWCBaseline --disable-sandbox` with temporary Swift/Clang module caches: **262 tests / 36 suites passed**. Fixtures exercise signed claims/tampered signatures, denied and mismatched callbacks, actual callback-listener readiness, concurrent refresh, credential modes, model-catalog account identity, strict multiline/malformed/truncated SSE, orphan/duplicate tool IDs, parallel argument streams, opaque reasoning and assistant phase, missing session rejection, quota failure/no retry, interrupted output/no success, persistence failure/no success, and loopback error framing.
+`swift test --scratch-path /tmp/ClaudexSIWCBaseline --disable-sandbox` with temporary Swift/Clang module caches: **263 tests / 36 suites passed**. Fixtures exercise signed claims/tampered signatures, denied and mismatched callbacks, actual callback-listener readiness, concurrent refresh, credential modes, model-catalog account identity, strict multiline/malformed/truncated SSE, orphan/duplicate tool IDs, parallel argument streams, opaque reasoning and assistant phase, missing session rejection, quota failure/no retry, interrupted output/no success, persistence failure/no success, and loopback error framing.
 
 Restricted-environment socket/key generation and compiler caches required approved sandbox escalation. No automatic review rejection occurred. The old private-backend sub-50ms wall-clock assertion was flaky under concurrent CPU work and cannot certify SIWC latency; it now verifies actual SSE message-start/delta/stop ordering. No SIWC latency claim is made.
 

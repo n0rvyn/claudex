@@ -1707,4 +1707,3 @@ public actor AnthropicBridge {
         try convertTools(tools).convertedTools
     }
 }
-
