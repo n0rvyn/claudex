@@ -148,7 +148,7 @@ struct CCRouterApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("Claudex", systemImage: "arrow.triangle.branch") {
+        MenuBarExtra("Claudex", systemImage: "terminal.fill") {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Claudex")
                     .font(.headline)

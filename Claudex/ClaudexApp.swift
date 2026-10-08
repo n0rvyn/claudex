@@ -15,7 +15,7 @@ struct ClaudexApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("Claudex", systemImage: "arrow.triangle.branch") {
+        MenuBarExtra("Claudex", systemImage: "terminal.fill") {
             ContentView(model: model)
                 .preferredColorScheme(preferredColorScheme)
         }
