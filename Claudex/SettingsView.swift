@@ -506,7 +506,6 @@ private struct ClaudeCodeSettingsTab: View {
 
 private struct UpstreamSettingsTab: View {
     @ObservedObject var model: AppModel
-    @State private var optionsExpanded = false
     private var draftError: String? {
         let route = ModelRoute(upstreamModel: model.fallbackRouteDraft.upstreamModel, reasoningEffort: model.fallbackRouteDraft.effort, textVerbosity: model.fallbackRouteDraft.verbosity)
         if !model.useAdvancedRouting, model.modelCatalogUsable {
@@ -595,18 +594,6 @@ private struct UpstreamSettingsTab: View {
                 HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }.padding(.vertical, 10)
             }
             SelectedModelHints(model: model)
-            DisclosureGroup("Advanced routing") {
-                Text("Custom source names and ordered matching rules. Existing mappings are preserved.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                RoutingPolicyEditor(model: model).environmentObject(model)
-            }.padding(.top, 14)
-            DisclosureGroup("Answer detail", isExpanded: $optionsExpanded) {
-                Text(model.useAdvancedRouting ? "Applies only to the Other fallback. Role mappings retain their own saved answer detail." : "Applies to all roles using the shared model.")
-                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                Text("Controls response length and detail, separately from reasoning effort.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                Picker("Answer detail", selection: $model.fallbackRouteDraft.verbosity) {
-                    ForEach(RoutingOptions.verbosities, id: \.self) { Text($0).tag($0) }
-                }.padding(.top, 6)
-            }.padding(.top, 8)
         }
         .onAppear { model.enableMappingAutosave() }
         .task { await model.loadChatGPTAccounts(); await model.startTokenStatusPolling() }
