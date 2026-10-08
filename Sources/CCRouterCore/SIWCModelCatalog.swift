@@ -14,10 +14,10 @@ public struct SIWCModelCatalogSnapshot: Codable, Sendable {
         guard let model = models.first(where: { $0.id == route.upstreamModel }) else {
             return "Model \(route.upstreamModel) is unavailable to the selected account. Choose a model from the refreshed list."
         }
-        guard !model.reasoningEfforts.isEmpty else {
+        guard !model.scalarReasoningEfforts.isEmpty else {
             return "Reasoning options for \(route.upstreamModel) were not supplied by the account. Refresh models before saving."
         }
-        guard model.reasoningEfforts.contains(route.reasoningEffort) else {
+        guard model.scalarReasoningEfforts.contains(route.reasoningEffort) else {
             return "Choose a supported reasoning effort for \(route.upstreamModel)."
         }
         return nil
@@ -97,6 +97,7 @@ public extension SIWCModelSummary {
             return effort
         }
     }
+    var scalarReasoningEfforts: [String] { reasoningEfforts.filter { EffortPolicy.levels.contains($0) } }
     var capabilitySummary: String {
         var entries: [String] = []
         if let parallel = details.bool("supports_parallel_tool_calls") { entries.append("Parallel tool calls: " + (parallel ? "Yes" : "No")) }

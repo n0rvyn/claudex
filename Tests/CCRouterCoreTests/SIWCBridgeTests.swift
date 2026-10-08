@@ -255,4 +255,39 @@ struct SIWCBridgeTests {
         #expect(await bridge.pendingToolTurnsCount() == 0)
     }
 
+    private func effortRequest(_ history: String, effort: String, budget: Bool = false) -> HTTPRequest {
+        let old = request(history)
+        var body = try! JSONDecoder().decode(JSONObject.self, from: old.body)
+        body["output_config"] = .object(JSONObject.from(["effort": .string(effort)]))
+        if budget { body["thinking"] = .object(JSONObject.from(["type": .string("enabled"), "budget_tokens": .number(4096)])) }
+        return HTTPRequest(method: old.method, path: old.path, headers: old.headers, body: try! JSONEncoder().encode(body))
+    }
+    @Test func fixedIgnoresClientEffortAndNeverNeedsCatalog() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, catalogProvider: { _ in throw SIWCError.remote("must_not_load") })
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route, singleModelMode: true), advisorRoute: Self.route)
+        try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"fixed"}]"#, effort: "ultra", budget: true)), SIWCFixtureWriter())
+        #expect(await client.payload(0).object("reasoning")?.string("effort") == "low")
+    }
+    @Test func adjustedRouteIsPinnedAcrossClientAndRoutingChanges() async throws {
+        let client = SIWCFixtureClient([[done(call("call_pin", itemID: "item_pin")), completed], [completed]])
+        let catalog = SIWCModelCatalogSnapshot(accountID: "account-fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "fixture-model", label: "Fixture", accountID: "account-fixture", details: JSONObject.from(["supported_reasoning_levels": .array(["low", "medium", "high"].map { .object(JSONObject.from(["effort": .string($0)])) })]))])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: SIWCReplayStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), catalogProvider: { _ in catalog })
+        let ceiling = ModelRoute(upstreamModel: "fixture-model", reasoningEffort: "high", textVerbosity: "low")
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: ceiling, allowClientEffort: true), advisorRoute: ceiling)
+        try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"pin"}]"#, effort: "medium")), SIWCFixtureWriter())
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: ModelRoute(upstreamModel: "changed", reasoningEffort: "max", textVerbosity: "high"), allowClientEffort: true), advisorRoute: ceiling)
+        try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"pin"},{"role":"assistant","content":[{"type":"tool_use","id":"call_pin","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_pin","content":"file"}]}]"#, effort: "low")), SIWCFixtureWriter())
+        #expect(await client.payload(0).object("reasoning")?.string("effort") == "medium")
+        #expect(await client.payload(1).object("reasoning")?.string("effort") == "medium")
+        #expect(await client.payload(1).string("model") == "fixture-model")
+    }
+    @Test func unsupportedAdjustmentFailsBeforeInference() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, catalogProvider: { _ in throw SIWCError.remote("metadata unavailable") })
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route, allowClientEffort: true), advisorRoute: Self.route)
+        #expect(await bridge.handleMessages(effortRequest(#"[{"role":"user","content":"no call"}]"#, effort: "low")).statusCode == 400)
+        #expect(await client.calls == 0)
+    }
+
 }

@@ -43,11 +43,14 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
     public let fallback: ModelRoute
     /// Inactive advanced rules remain available when using one model. Nil preserves legacy behavior.
     public let singleModelMode: Bool?
+    /// Nil/false fixes effort; true treats each route effort as default and ceiling.
+    public let allowClientEffort: Bool?
 
-    public init(rules: [ModelRoutingRule], fallback: ModelRoute, singleModelMode: Bool? = nil) {
+    public init(rules: [ModelRoutingRule], fallback: ModelRoute, singleModelMode: Bool? = nil, allowClientEffort: Bool? = nil) {
         self.rules = rules
         self.fallback = fallback
         self.singleModelMode = singleModelMode
+        self.allowClientEffort = allowClientEffort
     }
 
     /// Resolves a Claude `model` string to a `ModelRoute`.

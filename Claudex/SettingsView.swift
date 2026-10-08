@@ -34,7 +34,7 @@ struct DoctorSettingsView: View {
             }
             SettingsFooter(model: model)
         }.font(MBFont.label).tint(MBColor.brand).accentColor(MBColor.brand).background(MBColor.paper).tint(MBColor.brand)
-        .background(SettingsWindowSizing().frame(width: 1, height: 1).opacity(0))
+        .background(SettingsWindowSizing())
         .onAppear {
             #if DEBUG
             switch ProcessInfo.processInfo.environment["CLAUDEX_UI_PANE"] {
@@ -71,7 +71,6 @@ private struct SettingsFooter: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 8)
-            if model.daemonIsRunning { Button("Pause") { model.stopDaemon() }.buttonStyle(.borderless) }
             Text(model.appVersion)
                 .font(MBFont.monoSmall)
                 .foregroundStyle(MBColor.inkFaint)
@@ -115,6 +114,7 @@ private struct SettingsShell<Content: View>: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .background(MBColor.paper)
     }
 }
@@ -346,6 +346,13 @@ private struct GatewaySettingsTab: View {
     var body: some View {
         SettingsShell {
             Text("Gateway").font(MBFont.title).padding(.bottom, 20)
+            HStack {
+                Label(model.daemonIsRunning ? "Gateway running" : "Gateway paused", systemImage: model.daemonIsRunning ? "circle.fill" : "pause.circle")
+                    .foregroundStyle(MBColor.inkDim)
+                Spacer()
+                Button(model.daemonIsRunning ? "Pause" : "Start") { model.toggleDaemon() }
+                    .buttonStyle(.borderedProminent).disabled(!model.daemonIsRunning && !model.canStartDaemon)
+            }.padding(.bottom, 20)
             MBSection(title: "Local listener") {
                 MBField(
                     label: "Listener host",
@@ -498,7 +505,7 @@ private struct ClaudeCodeSettingsTab: View {
 
 private struct UpstreamSettingsTab: View {
     @ObservedObject var model: AppModel
-    @State private var advancedExpanded = false
+    @State private var optionsExpanded = false
     @State private var metadataExpanded = false
     private var draftError: String? {
         let route = ModelRoute(upstreamModel: model.fallbackRouteDraft.upstreamModel, reasoningEffort: model.fallbackRouteDraft.effort, textVerbosity: model.fallbackRouteDraft.verbosity)
@@ -506,16 +513,17 @@ private struct UpstreamSettingsTab: View {
             guard let selected = model.availableChatGPTModels.first(where: { $0.id == route.upstreamModel }) else {
                 return "Saved model \(route.upstreamModel) is unavailable. Choose an account model; saved settings stay intact until you apply changes."
             }
-            if !selected.reasoningEfforts.contains(route.reasoningEffort) {
+            if !selected.scalarReasoningEfforts.contains(route.reasoningEffort) {
                 return "Saved effort \(route.reasoningEffort.isEmpty ? "(none)" : route.reasoningEffort) is unavailable. Choose a supported reasoning effort."
             }
         }
         return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } : []) + [route])
     }
     var body: some View {
+        ScrollViewReader { proxy in
         SettingsShell {
             Text("Account & model").font(MBFont.title).padding(.bottom, 6)
-            Text("Connect ChatGPT, choose a model, then start the gateway.")
+            Text("Connect ChatGPT, map Claude models, then start the gateway.")
                 .foregroundStyle(MBColor.inkDim).padding(.bottom, 22)
             MBSection(title: "1. Connect ChatGPT") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -541,7 +549,7 @@ private struct UpstreamSettingsTab: View {
                     if let error = model.signInError { Text(error).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
                 }.padding(.vertical, 12)
             }
-            MBSection(title: "2. Choose your model") {
+            MBSection(title: "2. Model mapping") {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top) {
                         if model.isLoadingModelCatalog { ProgressView().controlSize(.small) }
@@ -549,62 +557,97 @@ private struct UpstreamSettingsTab: View {
                         Button("Refresh") { Task { await model.loadChatGPTModelCatalog() } }
                             .disabled(model.isLoadingModelCatalog || !model.chatGPTAccounts.contains(where: { $0.active && $0.authorized }))
                     }
+                    Toggle("Use the same model for all", isOn: Binding(
+                        get: { !model.useAdvancedRouting },
+                        set: { same in
+                            model.useAdvancedRouting = !same
+                            if !same { model.prepareClaudeModelRows() }
+                        }
+                    ))
+                    Toggle("Allow Claude to adjust", isOn: $model.allowClaudeAdjustment)
+                    Text(model.allowClaudeAdjustment ? "Chosen effort is the default and maximum. Claude may request a lower supported effort. Thinking budgets cannot be translated." : "Chosen model and effort are fixed. Claude’s effort and thinking settings are overridden.")
+                        .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
                     if !model.useAdvancedRouting {
-                        RouteDraftPickers(draft: $model.fallbackRouteDraft, showVerbosity: false).environmentObject(model)
+                        RouteDraftPickers(draft: $model.fallbackRouteDraft, showVerbosity: false, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
                         Text("One model handles all Claude Code model choices. Tools and permissions stay in Claude Code.")
                             .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
                     } else {
-                        Label("Advanced routing is active", systemImage: "arrow.triangle.branch")
-                        Text("Your saved rules choose a model for each Claude role. Open Advanced to edit them, or turn off per-role routing to use one model.")
-                            .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                        ForEach(["opus", "sonnet", "haiku"], id: \.self) { keyword in
+                            ClaudeModelRouteRow(model: model, keyword: keyword, onFocus: { proxy.scrollTo(keyword, anchor: .center) }).id(keyword)
+                        }
+                        Text("Other Claude models").font(.system(size: 13, weight: .medium))
+                        RouteDraftPickers(draft: $model.fallbackRouteDraft, showVerbosity: false, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
+                        DisclosureGroup(model.hasCustomRoutingRules ? "Custom source aliases & rules" : "Custom source alias") {
+                            Text("Match another source name. Custom rules retain their ordered matching behavior.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                            RoutingPolicyEditor(model: model).environmentObject(model)
+                        }
                     }
-                    if model.modelCatalogUsable, let error = draftError { Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
-                    if let error = model.routingSaveError { Text(error).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
-                }.padding(.vertical, 12)
-            }
-            MBSection(title: "3. Start") {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label(model.daemonIsRunning ? "Gateway running" : "Gateway paused", systemImage: model.daemonIsRunning ? "circle.fill" : "pause.circle")
-                            .foregroundStyle(model.daemonIsRunning ? MBColor.liveInk : MBColor.inkDim)
-                        Spacer()
-                        if model.daemonIsRunning { Button("Pause") { model.stopDaemon() } }
-                        Button(model.daemonIsRunning ? "Apply changes" : "Save & start") {
-                            Task {
-                                await model.saveRoutingAndApply()
-                                if model.routingSaveError == nil && !model.daemonIsRunning { model.startDaemon() }
-                            }
-                        }.buttonStyle(.borderedProminent).disabled(draftError != nil || !model.isUpstreamReady)
-                    }
-                    if model.statusText.hasPrefix("Failed") { Text(model.statusText).foregroundStyle(MBColor.faultInk) }
-                    if model.showConnectionInstructions && model.daemonIsRunning {
-                        Text("Paste the connection exports into your terminal, then launch Claude Code. Requests use your ChatGPT plan.").font(MBFont.caption)
-                        HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }
+                    if model.modelCatalogUsable, model.routingSaveError == nil, let error = draftError { Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
+                    Text(model.mappingSaveStatus).font(MBFont.caption).foregroundStyle(model.routingSaveError == nil ? MBColor.inkDim : MBColor.faultInk)
+                    if let error = model.routingSaveError {
+                        Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).textSelection(.enabled)
+                        HStack {
+                            Button("Retry saving") { model.scheduleMappingSave() }
+                            Button("Restore saved mapping") { model.reloadPersistedConfiguration() }
+                        }
                     }
                 }.padding(.vertical, 12)
             }
-            DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Toggle("Use per-role routing", isOn: $model.useAdvancedRouting)
-                    Text("Single-model mode keeps these rules for later. Changes take effect only when you save.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                    if model.useAdvancedRouting { RoutingPolicyEditor(model: model).environmentObject(model) }
-                    else {
-                        Picker("Response detail", selection: $model.fallbackRouteDraft.verbosity) {
-                            ForEach(RoutingOptions.verbosities, id: \.self) { Text($0).tag($0) }
+            if model.statusText.hasPrefix("Failed") { Text(model.statusText).foregroundStyle(MBColor.faultInk).padding(.bottom, 12) }
+            if model.showConnectionInstructions && model.daemonIsRunning {
+                Text("Paste the connection exports into your terminal, then launch Claude Code. Requests use your ChatGPT plan.").font(MBFont.caption)
+                HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }.padding(.vertical, 10)
+            }
+            DisclosureGroup("Model details", isExpanded: $metadataExpanded) {
+                VStack(alignment: .leading, spacing: 12) {
+                    let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) : []) + [model.fallbackRouteDraft.upstreamModel])
+                    ForEach(model.availableChatGPTModels.filter { ids.contains($0.id) }) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(item.label).font(.system(size: 14, weight: .semibold))
+                            Text(item.id).font(MBFont.mono).textSelection(.enabled)
+                            Text("Supported efforts · " + (item.scalarReasoningEfforts.isEmpty ? "Unavailable" : item.scalarReasoningEfforts.joined(separator: ", ")))
+                            Text("Account suggested effort · " + (item.details.string("default_reasoning_level") ?? "Unavailable"))
+                            Text(item.capabilitySummary).foregroundStyle(MBColor.inkDim)
+                            DisclosureGroup("Raw metadata") { Text(item.detailsText).font(MBFont.mono).textSelection(.enabled) }
                         }
                     }
-                    DisclosureGroup("Account model metadata", isExpanded: $metadataExpanded) {
-                        ForEach(model.availableChatGPTModels) { item in
-                            DisclosureGroup(item.label) { Text(item.detailsText).font(MBFont.mono).textSelection(.enabled) }
-                        }
-                    }
-                    Text("Responses endpoint · https://api.openai.com/v1/responses").font(MBFont.caption).textSelection(.enabled)
-                    Button("Discard edits & reload saved settings") { model.reloadPersistedConfiguration() }
-                    Button("Save without starting") { Task { await model.saveRoutingAndApply() } }.disabled(draftError != nil)
-                }.padding(.top, 12)
-            }.padding(.top, 4)
+                    Text("Source · selected account’s OpenAI model catalog").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    Text(model.modelCatalogStatus).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                }.padding(.top, 10)
+            }
+            DisclosureGroup("Response options", isExpanded: $optionsExpanded) {
+                Picker("Response detail for other / all models", selection: $model.fallbackRouteDraft.verbosity) {
+                    ForEach(RoutingOptions.verbosities, id: \.self) { Text($0).tag($0) }
+                }.padding(.top, 10)
+            }.padding(.top, 8)
         }
+        .onAppear { model.enableMappingAutosave() }
         .task { await model.loadChatGPTAccounts(); await model.startTokenStatusPolling() }
+        }
+    }
+}
+
+private struct ClaudeModelRouteRow: View {
+    @ObservedObject var model: AppModel
+    let keyword: String
+    var onFocus: () -> Void = {}
+    private var route: Binding<RouteDraft> {
+        Binding(get: {
+            guard let row = model.routingRulesDraft.first(where: { $0.keyword.lowercased() == keyword }) else { return model.fallbackRouteDraft }
+            return RouteDraft(upstreamModel: row.upstreamModel, effort: row.effort, verbosity: row.verbosity)
+        }, set: { value in
+            model.prepareClaudeModelRows()
+            guard let index = model.routingRulesDraft.firstIndex(where: { $0.keyword.lowercased() == keyword }) else { return }
+            model.routingRulesDraft[index].upstreamModel = value.upstreamModel
+            model.routingRulesDraft[index].effort = value.effort
+            model.routingRulesDraft[index].verbosity = value.verbosity
+        })
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(keyword.capitalized).font(.system(size: 13, weight: .medium))
+            RouteDraftPickers(draft: route, showVerbosity: false, onFocus: onFocus).environmentObject(model)
+        }
     }
 }
 
@@ -795,9 +838,12 @@ private struct RoutePolicyBlock: View {
 private struct RouteDraftPickers: View {
     @Binding var draft: RouteDraft
     var showVerbosity = true
+    var onFocus: () -> Void = {}
+    private enum Field: Hashable { case model, effort, verbosity }
+    @FocusState private var focusedField: Field?
     @EnvironmentObject private var model: AppModel
     private var selected: SIWCModelSummary? { model.availableChatGPTModels.first { $0.id == draft.upstreamModel } }
-    private var efforts: [String] { selected?.reasoningEfforts ?? [] }
+    private var efforts: [String] { selected?.scalarReasoningEfforts ?? [] }
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
@@ -806,22 +852,22 @@ private struct RouteDraftPickers: View {
                         if selected == nil { Text("Unavailable: " + draft.upstreamModel).tag(draft.upstreamModel).disabled(true) }
                         ForEach(model.availableChatGPTModels) { item in Text(item.label).tag(item.id) }
                     }
-                    .labelsHidden()
+                    .labelsHidden().focused($focusedField, equals: .model)
                     .disabled(!model.modelCatalogUsable)
                     .onChange(of: draft.upstreamModel) { _, _ in
                         if !efforts.contains(draft.effort) { draft.effort = "" }
                     }
                 }.frame(maxWidth: 350)
-                RoutePickerColumn(title: "Reasoning") {
-                    Picker("Reasoning", selection: $draft.effort) {
+                RoutePickerColumn(title: model.allowClaudeAdjustment ? "Default / maximum" : "Fixed effort") {
+                    Picker(model.allowClaudeAdjustment ? "Default / maximum effort" : "Fixed effort", selection: $draft.effort) {
                         if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose effort" : "Unavailable").tag(draft.effort).disabled(true) }
                         ForEach(efforts, id: \.self) { value in Text(value).tag(value) }
-                    }.labelsHidden().disabled(!model.modelCatalogUsable || efforts.isEmpty)
-                }.frame(maxWidth: 130)
+                    }.labelsHidden().focused($focusedField, equals: .effort).disabled(!model.modelCatalogUsable || efforts.isEmpty)
+                }.frame(maxWidth: 150)
                 if showVerbosity { RoutePickerColumn(title: "Response detail") {
                     Picker("Verbosity", selection: $draft.verbosity) {
                         ForEach(RoutingOptions.verbosities, id: \.self) { value in Text(value).tag(value) }
-                    }.labelsHidden()
+                    }.labelsHidden().focused($focusedField, equals: .verbosity)
                 }.frame(maxWidth: 130) }
             }
             if let selected {
@@ -829,6 +875,7 @@ private struct RouteDraftPickers: View {
                 if efforts.isEmpty && showVerbosity { Text("Reasoning metadata unavailable; refresh before saving.").font(MBFont.caption).foregroundStyle(MBColor.faultInk) }
             } else if showVerbosity { Text("Choose an available account model; the saved value has not been replaced automatically.").font(MBFont.caption).foregroundStyle(MBColor.faultInk) }
         }.frame(maxWidth: .infinity, alignment: .leading)
+            .onChange(of: focusedField) { _, field in if field != nil { onFocus() } }
     }
 }
 
@@ -864,7 +911,7 @@ private struct DiagnosticsSettingsTab: View {
                 valueText(model.lastRequestOutcome).padding(.vertical, 12)
                 if !model.recentErrorReasons.isEmpty { valueText(joinedOrFallback(model.recentErrorReasons)) }
             }
-            DisclosureGroup("Request details") {
+            DisclosureGroup {
                 MBField(label: "Recent stages") {
                     valueText(formatStagePairs(model.traceStageCounts), mono: true)
                 }
@@ -880,9 +927,11 @@ private struct DiagnosticsSettingsTab: View {
                 MBField(label: "Recent errors") {
                     valueText(joinedOrFallback(model.recentErrorReasons))
                 }
-            }
+            } label: {
+                Text("Request details").font(.system(size: 14, weight: .semibold)).foregroundStyle(MBColor.ink)
+            }.padding(.vertical, 8)
 
-            DisclosureGroup("Trace log") {
+            DisclosureGroup {
                 MBField(
                     label: "Log file",
                     help: "Claudex appends one JSON object per line as requests flow through.",
@@ -901,7 +950,9 @@ private struct DiagnosticsSettingsTab: View {
                 MBField(label: "Recent lines", stacked: true) {
                     recentLogsPanel
                 }
-            }
+            } label: {
+                Text("Trace log").font(.system(size: 14, weight: .semibold)).foregroundStyle(MBColor.ink)
+            }.padding(.vertical, 8)
         }
     }
 
@@ -980,12 +1031,37 @@ private func joinedOrFallback(_ values: [String]) -> String {
 /// SwiftUI Settings windows otherwise inherit a fixed content fitting size on macOS 15.
 private struct SettingsWindowSizing: NSViewRepresentable {
     final class WindowView: NSView {
+        #if DEBUG
+        private var fixtureSizeApplied = false
+        #endif
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            DispatchQueue.main.async { [weak self] in
-                self?.window?.styleMask.insert(.resizable)
-                self?.window?.contentMinSize = NSSize(width: 680, height: 520)
+            NotificationCenter.default.removeObserver(self)
+            if let window {
+                NotificationCenter.default.addObserver(self, selector: #selector(configureWindow), name: NSWindow.didBecomeKeyNotification, object: window)
             }
+            DispatchQueue.main.async { [weak self] in self?.configureWindow() }
+        }
+        @objc private func configureWindow() {
+            guard let window else { return }
+            window.styleMask.insert(.resizable)
+            window.contentMinSize = NSSize(width: 680, height: 520)
+            // Settings scenes may retain an initial content-sized maximum after attachment.
+            window.contentMaxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            #if DEBUG
+            let environment = ProcessInfo.processInfo.environment
+            if !fixtureSizeApplied, environment["CLAUDEX_UI_FIXTURE"] != nil,
+               let raw = environment["CLAUDEX_UI_WINDOW_SIZE"] {
+                let parts = raw.split(separator: "x").compactMap { Double($0) }
+                if parts.count == 2, parts[0].isFinite, parts[1].isFinite, parts[0] >= 680, parts[1] >= 520 {
+                    fixtureSizeApplied = true
+                    window.setContentSize(NSSize(width: parts[0], height: parts[1]))
+                    let evidence = "Offline fixture resize: " + String(describing: window.frame) + "; resizable=" + String(window.styleMask.contains(.resizable)) + "\n"
+                    try? FileHandle.standardError.write(contentsOf: Data(evidence.utf8))
+                }
+            }
+            #endif
         }
     }
     func makeNSView(context: Context) -> WindowView { WindowView() }

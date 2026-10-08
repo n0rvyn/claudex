@@ -10,10 +10,23 @@ protocol ConfigurationStoring {
     func loadOrCreate() -> RouterConfiguration
     @discardableResult
     func save(configuration: RouterConfiguration) -> RouterConfiguration
+    func saveVerified(configuration: RouterConfiguration) throws -> RouterConfiguration
     func regenerateGatewayToken(from configuration: RouterConfiguration) -> RouterConfiguration
 }
 
-extension RouterConfigurationStore: ConfigurationStoring {}
+extension ConfigurationStoring {
+    func saveVerified(configuration: RouterConfiguration) throws -> RouterConfiguration {
+        let saved = save(configuration: configuration)
+        guard loadOrCreate().routingTable == saved.routingTable else {
+            throw NSError(domain: "Claudex.Configuration", code: 1, userInfo: [NSLocalizedDescriptionKey: "Settings could not be saved. Your last saved mapping remains active."])
+        }
+        return saved
+    }
+}
+
+extension RouterConfigurationStore: ConfigurationStoring {
+    func saveVerified(configuration: RouterConfiguration) throws -> RouterConfiguration { try saveChecked(configuration: configuration) }
+}
 
 // MARK: - Routing Insight Row
 
@@ -101,8 +114,14 @@ final class AppModel: ObservableObject {
     @Published var fallbackRouteDraft: RouteDraft
     @Published var advisorRouteDraft: RouteDraft
     @Published var useAdvancedRouting = false
+    @Published var allowClaudeAdjustment = false
     @Published var showConnectionInstructions = false
     @Published var routingSaveError: String?
+    @Published private(set) var mappingSaveStatus = "Changes save automatically"
+    private var mappingSaveTask: Task<Void, Never>?
+    private var mappingEditGeneration = 0
+    private var mappingAutosaveSubscriptions: Set<AnyCancellable> = []
+    private var isSyncingRoutingDrafts = false
     @Published var isRefreshingToken = false
     @Published var tokenRefreshError: String?
 
@@ -572,6 +591,8 @@ final class AppModel: ObservableObject {
         }
     }
     func selectChatGPTAccount(_ id: String) {
+        mappingSaveTask?.cancel(); mappingEditGeneration += 1
+        mappingSaveStatus = "Refresh models for the selected account before editing"
         if offlinePreview { daemonState = "stopped"; modelCatalogSnapshot = nil; availableChatGPTModels = []; modelCatalogError = "Account changed. Refresh models to continue."; return }
         Task {
             do { try await SIWCAuth.shared.select(id); await loadChatGPTAccounts(forceCatalogRefresh: true); refresh() }
@@ -644,13 +665,40 @@ final class AppModel: ObservableObject {
         routingRulesDraft.move(fromOffsets: source, toOffset: destination)
     }
 
-    func saveRoutingAndApply() async {
-        guard let port = Int(gatewayPortDraft), (1...65_535).contains(port) else {
+    func enableMappingAutosave() {
+        guard mappingAutosaveSubscriptions.isEmpty else { return }
+        Publishers.MergeMany([
+            $routingRulesDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $fallbackRouteDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $useAdvancedRouting.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $allowClaudeAdjustment.dropFirst().map { _ in () }.eraseToAnyPublisher()
+        ]).sink { [weak self] in
+            guard let self, !self.isSyncingRoutingDrafts else { return }
+            self.scheduleMappingSave()
+        }.store(in: &mappingAutosaveSubscriptions)
+    }
+
+    func scheduleMappingSave() {
+        mappingEditGeneration += 1
+        let generation = mappingEditGeneration
+        mappingSaveTask?.cancel()
+        mappingSaveStatus = "Saving…"
+        mappingSaveTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            guard let self, !Task.isCancelled, generation == self.mappingEditGeneration else { return }
+            await self.saveRoutingAndApply(syncSavedDrafts: false, onlyRouting: true)
+            guard generation == self.mappingEditGeneration else { return }
+            self.mappingSaveStatus = self.routingSaveError == nil ? "Saved" : "Not saved · last saved mapping remains active"
+        }
+    }
+
+    func saveRoutingAndApply(syncSavedDrafts: Bool = true, onlyRouting: Bool = false) async {
+        guard let port = onlyRouting ? currentConfiguration.port : Int(gatewayPortDraft), (1...65_535).contains(port) else {
             routingSaveError = "Port must be between 1 and 65535"
             statusText = routingSaveError ?? statusText
             return
         }
-        guard canPersistDraftAuthPath() else { return }
+        guard onlyRouting || canPersistDraftAuthPath() else { return }
 
         let trimmedRules = routingRulesDraft.map { draft in
             RoutingRuleDraft(
@@ -684,40 +732,46 @@ final class AppModel: ObservableObject {
                 reasoningEffort: fallbackRouteDraft.effort,
                 textVerbosity: fallbackRouteDraft.verbosity
             ),
-            singleModelMode: !useAdvancedRouting
+            singleModelMode: !useAdvancedRouting,
+            allowClientEffort: allowClaudeAdjustment
         )
         if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) : []) + [table.fallback]) {
             routingSaveError = error; statusText = error; return
         }
-        let advisor = ModelRoute(
+        let advisor = onlyRouting ? currentConfiguration.advisorRoute : ModelRoute(
             upstreamModel: advisorRouteDraft.upstreamModel,
             reasoningEffort: advisorRouteDraft.effort,
             textVerbosity: advisorRouteDraft.verbosity
         )
 
-        let saved = configurationStore.save(
+        let saved: RouterConfiguration
+        do { saved = try configurationStore.saveVerified(
             configuration: RouterConfiguration(
-                host: gatewayHostDraft,
+                host: onlyRouting ? currentConfiguration.host : gatewayHostDraft,
                 port: port,
                 healthPath: currentConfiguration.healthPath,
                 messagesPath: currentConfiguration.messagesPath,
                 countTokensPath: currentConfiguration.countTokensPath,
-                responsesURL: responsesURLDraft,
+                responsesURL: onlyRouting ? currentConfiguration.responsesURL : responsesURLDraft,
                 routingTable: table,
                 advisorRoute: advisor,
                 pendingToolTurnTTLSeconds: currentConfiguration.pendingToolTurnTTLSeconds,
                 advisorContextMessageLimit: currentConfiguration.advisorContextMessageLimit,
                 gatewayAuthToken: currentConfiguration.gatewayAuthToken,
                 gatewayAuthHeader: currentConfiguration.gatewayAuthHeader,
-                subscriptionAuthFilePath: subscriptionAuthFilePathDraft,
-                subscriptionAuthBookmarkData: subscriptionAuthBookmarkDataDraft,
+                subscriptionAuthFilePath: onlyRouting ? currentConfiguration.subscriptionAuthFilePath : subscriptionAuthFilePathDraft,
+                subscriptionAuthBookmarkData: onlyRouting ? currentConfiguration.subscriptionAuthBookmarkData : subscriptionAuthBookmarkDataDraft,
                 configurationPath: currentConfiguration.configurationPath,
                 configurationWarning: currentConfiguration.configurationWarning
             )
         )
+        } catch {
+            routingSaveError = error.localizedDescription
+            return
+        }
         currentConfiguration = saved
         applyConfigurationStatus(saved)
-        syncDrafts(saved)
+        if syncSavedDrafts { syncDrafts(saved) }
         if let routingUpdateApplier {
             await routingUpdateApplier(table, advisor)
         } else if !offlinePreview {
@@ -766,6 +820,8 @@ final class AppModel: ObservableObject {
     }
 
     func reloadPersistedConfiguration() {
+        mappingSaveTask?.cancel(); mappingEditGeneration += 1
+        mappingSaveStatus = "Restored saved mapping"; routingSaveError = nil
         let configuration = configurationStore.loadOrCreate()
         currentConfiguration = configuration
         applyConfigurationStatus(configuration)
@@ -814,7 +870,8 @@ final class AppModel: ObservableObject {
                     reasoningEffort: existingTable.fallback.reasoningEffort,
                     textVerbosity: existingTable.fallback.textVerbosity
                 ),
-                singleModelMode: existingTable.singleModelMode
+                singleModelMode: existingTable.singleModelMode,
+                allowClientEffort: existingTable.allowClientEffort
             )
             let existingAdvisor = currentConfiguration.advisorRoute
             let updatedAdvisor = ModelRoute(
@@ -948,7 +1005,10 @@ final class AppModel: ObservableObject {
 
     func syncRoutingDraftsFromConfiguration(_ configuration: RouterConfiguration? = nil) {
         let configuration = configuration ?? currentConfiguration
-        useAdvancedRouting = configuration.routingTable.singleModelMode.map { !$0 } ?? configuration.routingTable.rules.contains { $0.route != configuration.routingTable.fallback }
+        isSyncingRoutingDrafts = true
+        defer { isSyncingRoutingDrafts = false }
+        allowClaudeAdjustment = configuration.routingTable.allowClientEffort == true
+        useAdvancedRouting = configuration.routingTable.singleModelMode.map { !$0 } ?? true
         routingRulesDraft = configuration.routingTable.rules.map { rule in
             RoutingRuleDraft(
                 keyword: rule.match,
@@ -967,6 +1027,17 @@ final class AppModel: ObservableObject {
             effort: configuration.advisorRoute.reasoningEffort,
             verbosity: configuration.advisorRoute.textVerbosity
         )
+    }
+
+    func prepareClaudeModelRows() {
+        for keyword in ["opus", "sonnet", "haiku"] where !routingRulesDraft.contains(where: { $0.keyword.lowercased() == keyword }) {
+            routingRulesDraft.append(RoutingRuleDraft(keyword: keyword, upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity))
+        }
+    }
+
+    var hasCustomRoutingRules: Bool {
+        routingRulesDraft.contains { !["opus", "sonnet", "haiku"].contains($0.keyword.lowercased()) } ||
+        ["opus", "sonnet", "haiku"].contains { keyword in routingRulesDraft.filter { $0.keyword.lowercased() == keyword }.count > 1 }
     }
 
     private func makeDoctorNotes(configurationWarning: String?) -> [String] {
@@ -1056,17 +1127,21 @@ private final class PreviewConfigurationStore: ConfigurationStoring {
 }
 
 extension AppModel {
-    static func visualFixture(_ state: String) -> AppModel {
+    static func visualFixture(_ state: String, storeFactory: ((RouterConfiguration) -> any ConfigurationStoring)? = nil) -> AppModel {
         let route = ModelRoute(upstreamModel: state == "retired" ? "retired-model" : "gpt-6-luna", reasoningEffort: state == "unsupported" ? "ultra" : "low", textVerbosity: "low")
-        let config = RouterConfiguration(host: "127.0.0.1", port: 4317, healthPath: "/health", messagesPath: "/v1/messages", countTokensPath: "/v1/messages/count_tokens", responsesURL: "https://api.openai.com/v1/responses", routingTable: ModelRoutingTable(rules: [], fallback: route, singleModelMode: true), advisorRoute: route, gatewayAuthToken: "fixture-only-not-a-credential", gatewayAuthHeader: "x-mb-token", subscriptionAuthFilePath: "/tmp/claudex-ui/fixture-auth-unused", configurationPath: "/tmp/claudex-ui/fixture-config-unused", configurationWarning: nil)
+        let config = RouterConfiguration(host: "127.0.0.1", port: 4317, healthPath: "/health", messagesPath: "/v1/messages", countTokensPath: "/v1/messages/count_tokens", responsesURL: "https://api.openai.com/v1/responses", routingTable: ModelRoutingTable(rules: [], fallback: route, singleModelMode: false), advisorRoute: route, gatewayAuthToken: "fixture-only-not-a-credential", gatewayAuthHeader: "x-mb-token", subscriptionAuthFilePath: "/tmp/claudex-ui/fixture-auth-unused", configurationPath: "/tmp/claudex-ui/fixture-config-unused", configurationWarning: nil)
         let catalog = SIWCModelCatalog(directory: URL(fileURLWithPath: "/tmp/claudex-ui/catalog-fixture"), loader: { throw SIWCError.remote("Fixture catalog unavailable. Try refreshing.") })
-        let model = AppModel(configurationStore: PreviewConfigurationStore(config), modelCatalog: catalog, automaticallyLoadCatalog: false, offlinePreview: true)
+        let model = AppModel(configurationStore: storeFactory?(config) ?? PreviewConfigurationStore(config), modelCatalog: catalog, automaticallyLoadCatalog: false, offlinePreview: true)
         model.tracePath = "/tmp/claudex-ui/fixture-trace-unused"
         model.authState = .ready; model.authText = "ChatGPT connected"; model.statusText = "Gateway paused"
         model.chatGPTAccounts = [SIWCAccountSummary(id: "demo-account", label: "Alex · Personal workspace", clientID: "fixture-client", active: true, authorized: true)]
-        let json = """
+        var json = """
         {"accountID":"demo-account","fetchedAt":\(Date().timeIntervalSinceReferenceDate),"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","accountID":"demo-account","details":{"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"supports_parallel_tool_calls":true,"support_verbosity":true}},{"id":"gpt-6-sol","label":"GPT-6 Sol","accountID":"demo-account","details":{"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}]}}]}
         """
+        if state == "longMetadata" {
+            let note = String(data: try! JSONEncoder().encode(String(repeating: "LONG_METADATA_WORD_", count: 600)), encoding: .utf8)!
+            json = json.replacingOccurrences(of: "\"supports_parallel_tool_calls\":true", with: "\"fixture_note\":" + note + ",\"supports_parallel_tool_calls\":true")
+        }
         let snapshot = try! JSONDecoder().decode(SIWCModelCatalogSnapshot.self, from: Data(json.utf8))
         model.modelCatalogSnapshot = snapshot; model.availableChatGPTModels = snapshot.models
         switch state {

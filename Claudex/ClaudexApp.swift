@@ -36,8 +36,9 @@ struct ClaudexApp: App {
 
         Settings {
             DoctorSettingsView(model: model)
-                .frame(minWidth: 680, idealWidth: 820, minHeight: 520, idealHeight: 660)
+                .frame(minWidth: 680, idealWidth: 820, maxWidth: .infinity, minHeight: 520, idealHeight: 660, maxHeight: .infinity)
                 .preferredColorScheme(preferredColorScheme)
         }
+        .windowResizability(.contentMinSize)
     }
 }

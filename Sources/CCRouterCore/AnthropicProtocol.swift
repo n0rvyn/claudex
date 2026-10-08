@@ -89,20 +89,24 @@ public struct AnthropicMessagesRequest: Codable, Sendable {
 public struct AnthropicMessage: Codable, Sendable {
     public let role: String
     public let content: [JSONObject]
+    public let output_config: JSONObject?
 
-    public init(role: String, content: [JSONObject]) {
+    public init(role: String, content: [JSONObject], output_config: JSONObject? = nil) {
         self.role = role
         self.content = content
+        self.output_config = output_config
     }
 
     enum CodingKeys: String, CodingKey {
         case role
         case content
+        case output_config
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.role = try container.decode(String.self, forKey: .role)
+        self.output_config = try container.decodeIfPresent(JSONObject.self, forKey: .output_config)
 
         if let blocks = try? container.decode([JSONObject].self, forKey: .content) {
             self.content = blocks

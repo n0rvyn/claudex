@@ -100,7 +100,7 @@ struct RouterConfigurationMigrationTests {
     }
 
     @Test
-    func freshInstallUsesSingleModelAndPreservesAdvancedRules() throws {
+    func freshInstallUsesExplicitClaudeRowsWithSameInitialTarget() throws {
         // No config.json and no env override — loadOrCreate must synthesize ModelRoutingTable.defaultTable.
         // This is required for Phase 2 acceptance #4+#5 (opus/sonnet/haiku fan-out).
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -116,8 +116,9 @@ struct RouterConfigurationMigrationTests {
 
         let configuration = store.loadOrCreate()
 
-        #expect(configuration.routingTable.rules == ModelRoutingTable.defaultTable.rules)
-        #expect(configuration.routingTable.singleModelMode == true)
+        #expect(configuration.routingTable.rules.map(\.match) == ModelRoutingTable.defaultTable.rules.map(\.match))
+        #expect(configuration.routingTable.rules.allSatisfy { $0.route == configuration.routingTable.fallback })
+        #expect(configuration.routingTable.singleModelMode == false)
         #expect(configuration.routingTable.rules.count == 3)
         #expect(configuration.routingTable.resolve(for: "claude-opus-4-7").upstreamModel == "gpt-5.4")
         #expect(configuration.routingTable.resolve(for: "claude-sonnet-4-6").upstreamModel == "gpt-5.4")
@@ -281,4 +282,13 @@ struct RouterConfigurationMigrationTests {
         #expect(reloaded.pendingToolTurnTTLSeconds == 600)
         #expect(reloaded.advisorContextMessageLimit == 4)
     }
+    @Test func checkedSaveReportsFailureWithoutPretendingPersistence() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("failed-save-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RouterConfigurationStore(environment: ["CC_ROUTER_CONFIG_PATH": root.path], homeDirectoryURL: root)
+        let configuration = store.loadOrCreate()
+        #expect(throws: NSError.self) { try store.saveChecked(configuration: configuration) }
+    }
+
 }

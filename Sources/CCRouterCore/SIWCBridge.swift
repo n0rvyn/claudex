@@ -4,6 +4,8 @@ import CryptoKit
 /// Model-only bridge: all client tools are emitted to Claude Code for execution.
 /// No tool executor, Codex subprocess, or API-key fallback exists in this module.
 public actor SIWCBridge {
+    public typealias CatalogProvider = @Sendable (String) async throws -> SIWCModelCatalogSnapshot
+    private let catalogProvider: CatalogProvider
     private var routing: ModelRoutingTable
     private let auth: any SubscriptionSessionProviding
     private let client: any ResponsesStreamingClient
@@ -12,7 +14,9 @@ public actor SIWCBridge {
     private var inflight: [String: UUID] = [:]
     public init(configuration: RouterConfiguration, auth: any SubscriptionSessionProviding = SIWCAuth.shared,
                 client: any ResponsesStreamingClient = ResponsesClient(endpoint: URL(string: "https://api.openai.com/v1/responses")!),
-                counter: any AnthropicInputTokenCounting = AnthropicInputTokenCounter(), replayStore: SIWCReplayStore = SIWCReplayStore()) {
+                counter: any AnthropicInputTokenCounting = AnthropicInputTokenCounter(), replayStore: SIWCReplayStore = SIWCReplayStore(),
+                catalogProvider: @escaping CatalogProvider = { try await SIWCModelCatalog().load(accountID: $0) }) {
+        self.catalogProvider = catalogProvider
         self.routing = configuration.routingTable; self.auth = auth; self.client = client; self.counter = counter; self.replayStore = replayStore
     }
     public func updateRouting(table: ModelRoutingTable, advisorRoute: ModelRoute) { routing = table }
@@ -31,24 +35,42 @@ public actor SIWCBridge {
     public func handleCountTokens(_ request: HTTPRequest) async -> HTTPResponse {
         do {
             let input = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: request.body)
-            let payload = try Self.payload(input, route: routing.resolve(for: input.model))
+            let policy = routing
+            let effort = try EffortPolicy.clientEffort(input, headers: request.headers)
+            if policy.allowClientEffort == true { try EffortPolicy.validateAdjustment(requested: effort, thinking: input.thinking) }
+            var route = policy.resolve(for: input.model)
+            if policy.allowClientEffort == true {
+                let credentials = try await auth.loadCurrent()
+                route = try EffortPolicy.resolve(route: route, requested: effort, thinking: input.thinking, catalog: await catalogProvider(credentials.accountID), accountID: credentials.accountID)
+            }
+            let payload = try Self.payload(input, route: route)
             return try HTTPResponse.json(value: CountTokensResult(input_tokens: try await counter.countInputTokens(for: payload)))
         } catch { return Self.error(error, status: 400) }
     }
     public func handleMessages(_ request: HTTPRequest) async -> HTTPResponse {
         do {
             let input = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: request.body)
+            let policy = routing
             let credentials = try await auth.loadCurrent()
             let session = request.headers["x-claude-code-session-id"] ?? Self.sessionFromMetadata(input.metadata)
             guard let session, !session.isEmpty else { throw SIWCError.unsupported("Claude Code session identifier is required for stateless replay") }
             let scope = credentials.accountID + ":" + session
             let key = scope + ":" + Self.fingerprint(input.messages) + ":" + Self.contractFingerprint(input)
             try Self.validateToolHistory(input.messages)
-            var route = routing.resolve(for: input.model)
+            let effort = try EffortPolicy.clientEffort(input, headers: request.headers)
+            if policy.allowClientEffort == true { try EffortPolicy.validateAdjustment(requested: effort, thinking: input.thinking) }
+            var route = policy.resolve(for: input.model)
+            var continuationPinned = false
             if let lastAssistantIndex = input.messages.lastIndex(where: { $0.role == "assistant" }),
-               input.messages.suffix(from: lastAssistantIndex + 1).contains(where: { $0.content.contains(where: { $0.string("type") == "tool_result" }) }),
-               let pending = try replayStore.load(scope + ":" + Self.fingerprint(Array(input.messages[...lastAssistantIndex]))) {
+               input.messages.suffix(from: lastAssistantIndex + 1).contains(where: { $0.content.contains(where: { $0.string("type") == "tool_result" }) }) {
+                guard let pending = try replayStore.load(scope + ":" + Self.fingerprint(Array(input.messages[...lastAssistantIndex]))) else {
+                    throw SIWCError.unsupported("tool continuation replay is unavailable; resolved model and effort cannot be restored")
+                }
                 route = pending.route
+                continuationPinned = true
+            }
+            if !continuationPinned, policy.allowClientEffort == true {
+                route = try EffortPolicy.resolve(route: route, requested: effort, thinking: input.thinking, catalog: await catalogProvider(credentials.accountID), accountID: credentials.accountID)
             }
             var payload = try Self.payload(input, route: route)
             var items: [JSONValue] = []
@@ -92,7 +114,7 @@ public actor SIWCBridge {
                 },
                 stream: { [self, route] writer in
                     do {
-                        let blocks = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, allowedTools: Set((input.tools ?? []).compactMap { $0.string("name") }), beforeFinish: { [self, route] blocks in
+                        _ = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, allowedTools: Set((input.tools ?? []).compactMap { $0.string("name") }), beforeFinish: { [self, route] blocks in
                             try await saveReplay(blocks.raw, route: route, assistant: blocks.assistant, history: input.messages, scope: scope, sessionPresent: true)
                         })
                         await clearInflight(key, leaseID: leaseID)
@@ -128,17 +150,21 @@ public actor SIWCBridge {
         return nil
     }
     static func contractFingerprint(_ input: AnthropicMessagesRequest) -> String {
-        let contract = JSONObject.from(["system": .array((input.system ?? []).map(JSONValue.object)),
+        var contract = JSONObject.from(["system": .array((input.system ?? []).map(JSONValue.object)),
             "tools": .array((input.tools ?? []).map(JSONValue.object)),
             "tool_choice": input.tool_choice.map(JSONValue.object) ?? .null])
+        if let effort = input.output_config { contract["output_config"] = .object(effort) }
+        if let thinking = input.thinking { contract["thinking"] = .object(thinking) }
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         return Data(SHA256.hash(data: (try? encoder.encode(contract)) ?? Data())).map { String(format: "%02x", $0) }.joined()
     }
     static func fingerprint(_ messages: [AnthropicMessage]) -> String {
         let normalized = messages.map { message in
-            JSONObject.from(["role": .string(message.role), "content": .array(message.content.filter {
+            var value = JSONObject.from(["role": .string(message.role), "content": .array(message.content.filter {
                 $0.string("type") != "thinking" && $0.string("type") != "redacted_thinking"
             }.map(JSONValue.object))])
+            if let control = message.output_config { value["output_config"] = .object(control) }
+            return value
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         return Data(SHA256.hash(data: (try? encoder.encode(normalized)) ?? Data())).map { String(format: "%02x", $0) }.joined()
@@ -225,6 +251,8 @@ public actor SIWCBridge {
     }
 
     static func encode(_ message: AnthropicMessage) throws -> [JSONValue] {
+        if message.role == "system", message.content.isEmpty, let control = message.output_config,
+           Set(control.values.keys) == Set(["effort"]), control.string("effort") != nil { return [] }
         guard message.role == "user" || message.role == "assistant" else { throw SIWCError.unsupported("message role") }
         try validateContent(message.content)
         var items = IRResponsesCodec.encodeFullHistory([IRMessage(role: message.role,

@@ -62,6 +62,19 @@ public struct RouterConfigurationStore {
     }
 
     public func save(configuration: RouterConfiguration) -> RouterConfiguration {
+        saveResult(configuration: configuration).configuration
+    }
+
+    /// Atomic persistence with an explicit failure; callers retain their last valid state.
+    public func saveChecked(configuration: RouterConfiguration) throws -> RouterConfiguration {
+        let result = saveResult(configuration: configuration)
+        if let message = result.writeError {
+            throw NSError(domain: "Claudex.Configuration", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return result.configuration
+    }
+
+    private func saveResult(configuration: RouterConfiguration) -> (configuration: RouterConfiguration, writeError: String?) {
         let location = resolveConfigurationLocation()
         let stored = normalizedConfiguration(
             from: StoredConfiguration(
@@ -84,7 +97,7 @@ public struct RouterConfigurationStore {
             )
         )
         let writeWarning = persist(configuration: stored, to: location.url)
-        return resolveConfiguration(
+        let result = resolveConfiguration(
             stored: stored,
             storageURL: location.url,
             homeWarning: UserHomeResolver.containerizationWarning(
@@ -93,6 +106,7 @@ public struct RouterConfigurationStore {
             locationWarning: location.warning,
             writeWarning: writeWarning
         )
+        return (result, writeWarning)
     }
 
     public func regenerateGatewayToken(from configuration: RouterConfiguration) -> RouterConfiguration {
@@ -136,7 +150,8 @@ public struct RouterConfigurationStore {
             routingTable = ModelRoutingTable(
                 rules: baseRules,
                 fallback: ModelRoute(upstreamModel: envExec, reasoningEffort: "xhigh", textVerbosity: "low"),
-                singleModelMode: stored.routingTable?.singleModelMode
+                singleModelMode: stored.routingTable?.singleModelMode,
+                allowClientEffort: stored.routingTable?.allowClientEffort
             )
         } else if let table = stored.routingTable {
             routingTable = table
@@ -208,7 +223,7 @@ public struct RouterConfigurationStore {
             )
         } else {
             // Fresh install: ship 3-rule baseline so opus/sonnet/haiku fan out immediately.
-            routingTable = ModelRoutingTable(rules: ModelRoutingTable.defaultTable.rules, fallback: ModelRoutingTable.defaultTable.fallback, singleModelMode: true)
+            routingTable = ModelRoutingTable(rules: ModelRoutingTable.defaultTable.rules.map { ModelRoutingRule(match: $0.match, route: ModelRoutingTable.defaultTable.fallback) }, fallback: ModelRoutingTable.defaultTable.fallback, singleModelMode: false)
         }
 
         let advisorRoute: ModelRoute
