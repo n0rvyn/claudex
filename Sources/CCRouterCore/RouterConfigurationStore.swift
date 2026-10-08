@@ -135,7 +135,8 @@ public struct RouterConfigurationStore {
             let baseRules = stored.routingTable?.rules ?? []
             routingTable = ModelRoutingTable(
                 rules: baseRules,
-                fallback: ModelRoute(upstreamModel: envExec, reasoningEffort: "xhigh", textVerbosity: "low")
+                fallback: ModelRoute(upstreamModel: envExec, reasoningEffort: "xhigh", textVerbosity: "low"),
+                singleModelMode: stored.routingTable?.singleModelMode
             )
         } else if let table = stored.routingTable {
             routingTable = table
@@ -207,7 +208,7 @@ public struct RouterConfigurationStore {
             )
         } else {
             // Fresh install: ship 3-rule baseline so opus/sonnet/haiku fan out immediately.
-            routingTable = .defaultTable
+            routingTable = ModelRoutingTable(rules: ModelRoutingTable.defaultTable.rules, fallback: ModelRoutingTable.defaultTable.fallback, singleModelMode: true)
         }
 
         let advisorRoute: ModelRoute

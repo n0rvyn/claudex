@@ -41,16 +41,20 @@ public struct ResolvedRoute: Sendable, Equatable {
 public struct ModelRoutingTable: Codable, Sendable, Equatable {
     public let rules: [ModelRoutingRule]
     public let fallback: ModelRoute
+    /// Inactive advanced rules remain available when using one model. Nil preserves legacy behavior.
+    public let singleModelMode: Bool?
 
-    public init(rules: [ModelRoutingRule], fallback: ModelRoute) {
+    public init(rules: [ModelRoutingRule], fallback: ModelRoute, singleModelMode: Bool? = nil) {
         self.rules = rules
         self.fallback = fallback
+        self.singleModelMode = singleModelMode
     }
 
     /// Resolves a Claude `model` string to a `ModelRoute`.
     /// Performs a case-insensitive substring match; the first matching rule wins.
     /// Falls through to `fallback` when no rule matches.
     public func resolve(for claudeModel: String) -> ModelRoute {
+        if singleModelMode == true { return fallback }
         let needle = claudeModel.lowercased()
         for rule in rules {
             if needle.contains(rule.match.lowercased()) {
@@ -63,6 +67,7 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
     /// Resolves a Claude `model` string to a `ResolvedRoute`, including the matched rule label.
     /// Falls through to `fallback` with matchLabel `"fallback"` when no rule matches.
     public func resolveWithMatch(for claudeModel: String) -> ResolvedRoute {
+        if singleModelMode == true { return ResolvedRoute(route: fallback, matchLabel: "single model") }
         let needle = claudeModel.lowercased()
         for rule in rules {
             if needle.contains(rule.match.lowercased()) {

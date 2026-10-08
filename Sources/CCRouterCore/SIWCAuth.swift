@@ -377,6 +377,9 @@ public actor SIWCAuth: SubscriptionSessionProviding {
 public struct SIWCAccountSummary: Sendable, Identifiable {
     public let id: String; public let label: String; public let clientID: String
     public let active: Bool; public let authorized: Bool
+    public init(id: String, label: String, clientID: String, active: Bool, authorized: Bool) {
+        self.id = id; self.label = label; self.clientID = clientID; self.active = active; self.authorized = authorized
+    }
 }
 extension Data {
     var base64URL: String { base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") }

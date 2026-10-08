@@ -7,37 +7,53 @@ import SwiftUI
 
 struct DoctorSettingsView: View {
     @ObservedObject var model: AppModel
-    @State private var selection: SettingsTab = .general
-
+    @State private var selection: SettingsTab = .upstream
     var body: some View {
-        ZStack {
-            MBColor.paper.ignoresSafeArea()
-
-            TabView(selection: $selection) {
-                GeneralSettingsTab(model: model)
-                    .tag(SettingsTab.general)
-                    .tabItem { Label("General", systemImage: "gearshape") }
-
-                GatewaySettingsTab(model: model)
-                    .tag(SettingsTab.gateway)
-                    .tabItem { Label("Gateway", systemImage: "dot.radiowaves.left.and.right") }
-
-                ClaudeCodeSettingsTab(model: model)
-                    .tag(SettingsTab.claudeCode)
-                    .tabItem { Label("Claude Code", systemImage: "terminal") }
-
-                UpstreamSettingsTab(model: model)
-                    .tag(SettingsTab.upstream)
-                    .tabItem { Label("Upstream", systemImage: "arrow.triangle.branch") }
-
-                DiagnosticsSettingsTab(model: model)
-                    .tag(SettingsTab.diagnostics)
-                    .tabItem { Label("Diagnostics", systemImage: "waveform.and.magnifyingglass") }
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Claudex", systemImage: "terminal.fill").font(MBFont.title).padding(.bottom, 20)
+                    navigation("Account & model", icon: "person.crop.circle", tab: .upstream)
+                    navigation("Claude Code", icon: "terminal", tab: .claudeCode)
+                    navigation("Gateway", icon: "network", tab: .gateway)
+                    navigation("Activity", icon: "waveform.path", tab: .diagnostics)
+                    navigation("General", icon: "gearshape", tab: .general)
+                    Spacer()
+                }
+                .padding(14).frame(width: 178).frame(maxHeight: .infinity).background(MBColor.paperDim)
+                Divider()
+                Group {
+                    switch selection {
+                    case .general: GeneralSettingsTab(model: model)
+                    case .gateway: GatewaySettingsTab(model: model)
+                    case .claudeCode: ClaudeCodeSettingsTab(model: model)
+                    case .upstream: UpstreamSettingsTab(model: model)
+                    case .diagnostics: DiagnosticsSettingsTab(model: model)
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                SettingsFooter(model: model)
+            SettingsFooter(model: model)
+        }.font(MBFont.label).tint(MBColor.brand).accentColor(MBColor.brand).background(MBColor.paper).tint(MBColor.brand)
+        .background(SettingsWindowSizing().frame(width: 1, height: 1).opacity(0))
+        .onAppear {
+            #if DEBUG
+            switch ProcessInfo.processInfo.environment["CLAUDEX_UI_PANE"] {
+            case "general": selection = .general
+            case "gateway": selection = .gateway
+            case "claudeCode": selection = .claudeCode
+            case "diagnostics": selection = .diagnostics
+            default: break
             }
+            #endif
         }
+    }
+    private func navigation(_ title: String, icon: String, tab: SettingsTab) -> some View {
+        Button { selection = tab } label: {
+            Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 9).padding(.vertical, 8)
+                .foregroundStyle(selection == tab ? MBColor.ink : MBColor.inkDim)
+                .background(selection == tab ? MBColor.brandSoft : .clear, in: RoundedRectangle(cornerRadius: 7))
+        }.buttonStyle(.plain).accessibilityLabel(title)
     }
 }
 
@@ -50,11 +66,12 @@ private struct SettingsFooter: View {
         HStack(spacing: 8) {
             MBDot(state: model.headerDotState, size: 6)
             Text(statusLine)
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundStyle(MBColor.inkDim)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 8)
+            if model.daemonIsRunning { Button("Pause") { model.stopDaemon() }.buttonStyle(.borderless) }
             Text(model.appVersion)
                 .font(MBFont.monoSmall)
                 .foregroundStyle(MBColor.inkFaint)
@@ -92,8 +109,8 @@ private struct SettingsShell<Content: View>: View {
             VStack(alignment: .leading, spacing: 0) {
                 content
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 18)
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
             .padding(.bottom, 32)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -110,13 +127,11 @@ private struct GeneralSettingsTab: View {
 
     var body: some View {
         SettingsShell {
-            AppInfoCard(model: model)
-                .padding(.bottom, 14)
-
+            Text("General").font(MBFont.title).padding(.bottom, 20)
             MBSection(title: "Appearance") {
                 MBField(
                     label: "Theme",
-                    help: "Menu bar popover and settings window adapt to this."
+                    help: "Use system appearance or choose a theme."
                 ) {
                     MBSeg(
                         value: $appearanceRaw,
@@ -128,13 +143,13 @@ private struct GeneralSettingsTab: View {
             MBSection(title: "Startup") {
                 MBField(
                     label: "Launch at login",
-                    help: "Start Claudex and bind the local gateway when you log in."
+                    help: "Open Claudex when you sign in."
                 ) {
                     Toggle("", isOn: Binding(
                         get: { model.launchAtLoginEnabled },
                         set: { _ in model.toggleLaunchAtLogin() }
                     ))
-                    .toggleStyle(MBToggleStyle())
+                    .toggleStyle(.switch)
                     .labelsHidden()
                 }
                 launchAtLoginStatusView
@@ -181,7 +196,7 @@ private struct GeneralSettingsTab: View {
             MBBanner(
                 tone: .warn,
                 title: "Launch at login needs the packaged app bundle.",
-                message: "Run \"bash scripts/build_app_bundle.sh\" in the Claudex repo to produce dist/Claudex.app, then move it into /Applications."
+                message: "Install Claudex in Applications to enable launch at login."
             ) {
                 Button(action: { revealApplicationsFolder() }) {
                     Label("Open /Applications", systemImage: "app.gift")
@@ -246,7 +261,7 @@ private struct AppInfoCard: View {
                     .font(MBFont.labelB)
                     .foregroundStyle(MBColor.ink)
                 Text("Local Anthropic ↔ Codex bridge · \(model.appVersion)")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(MBColor.inkDim)
             }
             Spacer(minLength: 0)
@@ -330,7 +345,8 @@ private struct GatewaySettingsTab: View {
 
     var body: some View {
         SettingsShell {
-            MBSection(title: "Local gateway") {
+            Text("Gateway").font(MBFont.title).padding(.bottom, 20)
+            MBSection(title: "Local listener") {
                 MBField(
                     label: "Listener host",
                     help: "Where the local gateway binds. 127.0.0.1 keeps it loopback-only."
@@ -400,10 +416,7 @@ private struct GatewaySettingsTab: View {
     }
 
     private func mask(_ value: String) -> String {
-        guard value.count > 8 else { return String(repeating: "•", count: max(6, value.count)) }
-        let head = value.prefix(4)
-        let tail = value.suffix(4)
-        return "\(head)••••••••\(tail)"
+        "••••••••••••••••"
     }
 }
 
@@ -414,7 +427,9 @@ private struct ClaudeCodeSettingsTab: View {
 
     var body: some View {
         SettingsShell {
-            MBSection(title: "Environment") {
+            Text("Connect Claude Code").font(MBFont.title).padding(.bottom, 6)
+            Text("Copy the exports into your terminal, then launch Claude Code.").foregroundStyle(MBColor.inkDim).padding(.bottom, 20)
+            MBSection(title: "Connection exports") {
                 MBField(
                     label: "CLI snippet",
                     help: "Paste these two exports into the shell that runs Claude Code.",
@@ -438,10 +453,10 @@ private struct ClaudeCodeSettingsTab: View {
                 }
             }
 
-            MBSection(title: "Quick start") {
+            DisclosureGroup("Optional connection check") {
                 MBField(
-                    label: "Verified command",
-                    help: "Confirms Claude Code can reach the gateway end-to-end.",
+                    label: "Optional manual check",
+                    help: "Running this command consumes plan usage. Full Claude Code sessions have not yet been validated.",
                     stacked: true
                 ) {
                     MBReadOnlyField(value: """
@@ -458,17 +473,17 @@ private struct ClaudeCodeSettingsTab: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text("$").foregroundStyle(MBColor.live)
-                Text("export ").foregroundStyle(MBColor.inkDim)
-                + Text("ANTHROPIC_BASE_URL").foregroundStyle(MBColor.ink)
-                + Text("=").foregroundStyle(MBColor.inkDim)
-                + Text(model.endpoint).foregroundStyle(MBColor.warnInk)
+                Text("export ").foregroundStyle(MBColor.termDim)
+                + Text("ANTHROPIC_BASE_URL").foregroundStyle(MBColor.termInk)
+                + Text("=").foregroundStyle(MBColor.termDim)
+                + Text(model.endpoint).foregroundStyle(MBColor.termInk)
             }
             HStack(spacing: 8) {
                 Text("$").foregroundStyle(MBColor.live)
-                Text("export ").foregroundStyle(MBColor.inkDim)
-                + Text("ANTHROPIC_AUTH_TOKEN").foregroundStyle(MBColor.ink)
-                + Text("=").foregroundStyle(MBColor.inkDim)
-                + Text("<gateway-token>").foregroundStyle(MBColor.warnInk)
+                Text("export ").foregroundStyle(MBColor.termDim)
+                + Text("ANTHROPIC_AUTH_TOKEN").foregroundStyle(MBColor.termInk)
+                + Text("=").foregroundStyle(MBColor.termDim)
+                + Text("<gateway-token>").foregroundStyle(MBColor.termInk)
             }
         }
         .font(MBFont.mono)
@@ -483,148 +498,113 @@ private struct ClaudeCodeSettingsTab: View {
 
 private struct UpstreamSettingsTab: View {
     @ObservedObject var model: AppModel
-
+    @State private var advancedExpanded = false
+    @State private var metadataExpanded = false
+    private var draftError: String? {
+        let route = ModelRoute(upstreamModel: model.fallbackRouteDraft.upstreamModel, reasoningEffort: model.fallbackRouteDraft.effort, textVerbosity: model.fallbackRouteDraft.verbosity)
+        if !model.useAdvancedRouting, model.modelCatalogUsable {
+            guard let selected = model.availableChatGPTModels.first(where: { $0.id == route.upstreamModel }) else {
+                return "Saved model \(route.upstreamModel) is unavailable. Choose an account model; saved settings stay intact until you apply changes."
+            }
+            if !selected.reasoningEfforts.contains(route.reasoningEffort) {
+                return "Saved effort \(route.reasoningEffort.isEmpty ? "(none)" : route.reasoningEffort) is unavailable. Choose a supported reasoning effort."
+            }
+        }
+        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } : []) + [route])
+    }
     var body: some View {
         SettingsShell {
-            MBSection(title: "Route") {
-                MBField(
-                    label: "Destination",
-                    help: "Claudex currently routes Anthropic Messages to the subscription-backed responses endpoint.",
-                    stacked: true
-                ) {
-                    routeVisualization
-                }
-            }
-
-            MBSection(title: "Upstream") {
-                MBField(
-                    label: "Responses URL",
-                    help: "The subscription-backed HTTP endpoint to forward to."
-                ) {
-                    Text("https://api.openai.com/v1/responses").font(MBFont.mono).textSelection(.enabled)
-                }
-            }
-
-            MBSection(title: "Routing policy") {
-                Button("Refresh account models") { Task { await model.loadChatGPTModelCatalog() } }
-                    .disabled(model.isLoadingModelCatalog || !model.chatGPTAccounts.contains(where: { $0.active && $0.authorized }))
-                Text(model.modelCatalogStatus).font(.caption).foregroundStyle(MBColor.inkDim)
-                ForEach(model.availableChatGPTModels) { available in
-                    VStack(alignment: .leading) {
-                        Text("\(available.label) · \(available.id)").font(MBFont.mono).textSelection(.enabled)
-                        DisclosureGroup("Account-reported model details") {
-                            Text(available.detailsText).font(MBFont.mono).textSelection(.enabled)
+            Text("Account & model").font(MBFont.title).padding(.bottom, 6)
+            Text("Connect ChatGPT, choose a model, then start the gateway.")
+                .foregroundStyle(MBColor.inkDim).padding(.bottom, 22)
+            MBSection(title: "1. Connect ChatGPT") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(model.chatGPTAccounts) { account in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "person.crop.circle").foregroundStyle(MBColor.inkDim)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(account.label).textSelection(.enabled)
+                                Text(account.active && account.authorized ? "Connected · selected account" : account.authorized ? "Connected" : "Authorization needed")
+                                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            if !account.active && account.authorized { Button("Use") { model.selectChatGPTAccount(account.id) } }
+                            if account.authorized { Button("Sign out") { model.signOutChatGPT(account.id) } }
                         }
                     }
-                }
-                if let error = model.modelCatalogError { Text(error).foregroundStyle(MBColor.faultInk) }
-                Text("Availability is account-specific. Efforts and capabilities come from returned metadata; subscription cost is not established by this list.").font(.caption).foregroundStyle(MBColor.inkDim)
-                RoutingPolicyEditor(model: model).environmentObject(model)
-                if let error = model.savedRoutingCatalogError { Text(error).font(.caption).foregroundStyle(MBColor.faultInk) }
+                    if model.isSigningIn {
+                        HStack { ProgressView().controlSize(.small); Text("Finish connecting in your browser"); Button("Cancel") { model.cancelChatGPTSignIn() } }
+                        Text("You can cancel and try again without changing your routing.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    } else {
+                        Button(model.chatGPTAccounts.contains(where: { $0.authorized }) ? "Connect another account" : "Connect ChatGPT") { model.beginChatGPTSignIn() }
+                            .buttonStyle(.bordered)
+                    }
+                    if let error = model.signInError { Text(error).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
+                }.padding(.vertical, 12)
             }
-
-            MBSection(title: "ChatGPT account") {
-                ForEach(model.chatGPTAccounts) { account in
+            MBSection(title: "2. Choose your model") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top) {
+                        if model.isLoadingModelCatalog { ProgressView().controlSize(.small) }
+                        Text(model.modelCatalogStatus).font(MBFont.caption).foregroundStyle(MBColor.inkDim).frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Refresh") { Task { await model.loadChatGPTModelCatalog() } }
+                            .disabled(model.isLoadingModelCatalog || !model.chatGPTAccounts.contains(where: { $0.active && $0.authorized }))
+                    }
+                    if !model.useAdvancedRouting {
+                        RouteDraftPickers(draft: $model.fallbackRouteDraft, showVerbosity: false).environmentObject(model)
+                        Text("One model handles all Claude Code model choices. Tools and permissions stay in Claude Code.")
+                            .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    } else {
+                        Label("Advanced routing is active", systemImage: "arrow.triangle.branch")
+                        Text("Your saved rules choose a model for each Claude role. Open Advanced to edit them, or turn off per-role routing to use one model.")
+                            .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    }
+                    if model.modelCatalogUsable, let error = draftError { Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
+                    if let error = model.routingSaveError { Text(error).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
+                }.padding(.vertical, 12)
+            }
+            MBSection(title: "3. Start") {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        VStack(alignment: .leading) {
-                            Text(account.label)
-                            Text(account.clientID).font(MBFont.mono).foregroundStyle(MBColor.inkDim)
-                        }
+                        Label(model.daemonIsRunning ? "Gateway running" : "Gateway paused", systemImage: model.daemonIsRunning ? "circle.fill" : "pause.circle")
+                            .foregroundStyle(model.daemonIsRunning ? MBColor.liveInk : MBColor.inkDim)
                         Spacer()
-                        if account.active { Text("Active").foregroundStyle(MBColor.liveInk) }
-                        else { Button("Use account") { model.selectChatGPTAccount(account.id) } }
-                        if account.authorized { Button("Sign out") { model.signOutChatGPT(account.id) } }
-                        else { Button("Continue with ChatGPT") { model.beginChatGPTSignIn(accountID: account.id) } }
+                        if model.daemonIsRunning { Button("Pause") { model.stopDaemon() } }
+                        Button(model.daemonIsRunning ? "Apply changes" : "Save & start") {
+                            Task {
+                                await model.saveRoutingAndApply()
+                                if model.routingSaveError == nil && !model.daemonIsRunning { model.startDaemon() }
+                            }
+                        }.buttonStyle(.borderedProminent).disabled(draftError != nil || !model.isUpstreamReady)
                     }
-                }
-                if model.isSigningIn {
-                    HStack { ProgressView(); Text("Waiting for browser authorization"); Button("Cancel") { model.cancelChatGPTSignIn() } }
-                } else {
-                    Button("Continue with ChatGPT") { model.beginChatGPTSignIn() }
-                        .buttonStyle(.borderedProminent)
-                }
-                if let error = model.signInError { Text(error).foregroundStyle(MBColor.faultInk) }
-                Text("Authorize Claudex to use your ChatGPT plan. Claude Code continues to execute tools and handle permissions.")
-                    .font(.caption).foregroundStyle(MBColor.inkDim)
+                    if model.statusText.hasPrefix("Failed") { Text(model.statusText).foregroundStyle(MBColor.faultInk) }
+                    if model.showConnectionInstructions && model.daemonIsRunning {
+                        Text("Paste the connection exports into your terminal, then launch Claude Code. Requests use your ChatGPT plan.").font(MBFont.caption)
+                        HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }
+                    }
+                }.padding(.vertical, 12)
             }
-
-            HStack(spacing: 8) {
-                Button(action: { model.reloadPersistedConfiguration() }) {
-                    Label("Reload config", systemImage: "arrow.clockwise.circle")
-                }
-                Spacer(minLength: 0)
-                Button(action: { Task { await model.saveRoutingAndApply() } }) {
-                    Label("Save routing + upstream", systemImage: "tray.and.arrow.down")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding(.top, 4)
+            DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Toggle("Use per-role routing", isOn: $model.useAdvancedRouting)
+                    Text("Single-model mode keeps these rules for later. Changes take effect only when you save.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    if model.useAdvancedRouting { RoutingPolicyEditor(model: model).environmentObject(model) }
+                    else {
+                        Picker("Response detail", selection: $model.fallbackRouteDraft.verbosity) {
+                            ForEach(RoutingOptions.verbosities, id: \.self) { Text($0).tag($0) }
+                        }
+                    }
+                    DisclosureGroup("Account model metadata", isExpanded: $metadataExpanded) {
+                        ForEach(model.availableChatGPTModels) { item in
+                            DisclosureGroup(item.label) { Text(item.detailsText).font(MBFont.mono).textSelection(.enabled) }
+                        }
+                    }
+                    Text("Responses endpoint · https://api.openai.com/v1/responses").font(MBFont.caption).textSelection(.enabled)
+                    Button("Discard edits & reload saved settings") { model.reloadPersistedConfiguration() }
+                    Button("Save without starting") { Task { await model.saveRoutingAndApply() } }.disabled(draftError != nil)
+                }.padding(.top, 12)
+            }.padding(.top, 4)
         }
-        .task {
-            await model.loadChatGPTAccounts()
-            await model.startTokenStatusPolling()
-        }
-    }
-
-    private var routeVisualization: some View {
-        MBCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Source")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.5)
-                        .foregroundStyle(MBColor.inkDim)
-                    Text("Claude Code — POST \(model.currentConfiguration.messagesPath)")
-                        .font(MBFont.mono)
-                        .foregroundStyle(MBColor.ink)
-                }
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.down")
-                    Text("Routed to")
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(MBColor.inkFaint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.upstreamDisplayName)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(MBColor.liveInk)
-                    Text(model.upstreamHostLabel)
-                        .font(MBFont.mono)
-                        .foregroundStyle(MBColor.ink)
-                    Text("Executor · \(model.currentConfiguration.executorModel)")
-                        .font(MBFont.monoSmall)
-                        .foregroundStyle(MBColor.inkDim)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(MBColor.liveSoft)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(MBColor.live.opacity(0.3), lineWidth: 0.5)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-        }
-    }
-
-    private var tokenDotState: MBDot.State {
-        if model.isRefreshingToken { return .warn }
-        if model.doctorSnapshot?.hasRefreshToken == true && model.isUpstreamReady { return .live }
-        return model.isUpstreamReady ? .warn : .fault
-    }
-
-    private var tokenStateText: String {
-        if model.isRefreshingToken { return "refreshing…" }
-        if model.doctorSnapshot?.hasRefreshToken == true { return "ready" }
-        if model.isUpstreamReady { return "requires re-auth" }
-        return "auth unavailable"
-    }
-
-    private func relativeRefreshText(_ date: Date?) -> String {
-        guard let date else { return "never" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter.localizedString(for: date, relativeTo: Date())
+        .task { await model.loadChatGPTAccounts(); await model.startTokenStatusPolling() }
     }
 }
 
@@ -642,7 +622,7 @@ private struct RoutingRuleDraftRow: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text("RULE \(index + 1)")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .tracking(0.5)
                         .foregroundStyle(MBColor.inkDim)
                     MBPill(text: "\(draft.keyword.isEmpty ? "match" : draft.keyword) → \(draft.upstreamModel)", tone: .brand, mono: true)
@@ -721,7 +701,7 @@ private struct RoutingPolicyEditor: View {
                                 .font(MBFont.labelB)
                                 .foregroundStyle(MBColor.ink)
                             Text("Rules are checked from top to bottom. The first keyword contained in the Claude model name wins.")
-                                .font(.system(size: 11))
+                                .font(.system(size: 12))
                                 .foregroundStyle(MBColor.inkDim)
                         }
                         Spacer(minLength: 0)
@@ -736,7 +716,7 @@ private struct RoutingPolicyEditor: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(MBColor.inkMid)
                             Text("Default route will handle every Claude request until a match rule is added.")
-                                .font(.system(size: 11))
+                                .font(.system(size: 12))
                                 .foregroundStyle(MBColor.inkDim)
                                 .multilineTextAlignment(.center)
                         }
@@ -804,7 +784,7 @@ private struct RoutePolicyBlock: View {
                 Spacer(minLength: 0)
             }
             Text(help)
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundStyle(MBColor.inkDim)
             RouteDraftPickers(draft: $draft)
         }
@@ -814,6 +794,7 @@ private struct RoutePolicyBlock: View {
 
 private struct RouteDraftPickers: View {
     @Binding var draft: RouteDraft
+    var showVerbosity = true
     @EnvironmentObject private var model: AppModel
     private var selected: SIWCModelSummary? { model.availableChatGPTModels.first { $0.id == draft.upstreamModel } }
     private var efforts: [String] { selected?.reasoningEfforts ?? [] }
@@ -823,7 +804,7 @@ private struct RouteDraftPickers: View {
                 RoutePickerColumn(title: "Model") {
                     Picker("Model", selection: $draft.upstreamModel) {
                         if selected == nil { Text("Unavailable: " + draft.upstreamModel).tag(draft.upstreamModel).disabled(true) }
-                        ForEach(model.availableChatGPTModels) { item in Text(item.label + " · " + item.id).tag(item.id) }
+                        ForEach(model.availableChatGPTModels) { item in Text(item.label).tag(item.id) }
                     }
                     .labelsHidden()
                     .disabled(!model.modelCatalogUsable)
@@ -833,20 +814,20 @@ private struct RouteDraftPickers: View {
                 }.frame(maxWidth: 350)
                 RoutePickerColumn(title: "Reasoning") {
                     Picker("Reasoning", selection: $draft.effort) {
-                        if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose effort" : "Unsupported: " + draft.effort).tag(draft.effort).disabled(true) }
+                        if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose effort" : "Unavailable").tag(draft.effort).disabled(true) }
                         ForEach(efforts, id: \.self) { value in Text(value).tag(value) }
                     }.labelsHidden().disabled(!model.modelCatalogUsable || efforts.isEmpty)
                 }.frame(maxWidth: 130)
-                RoutePickerColumn(title: "Verbosity") {
+                if showVerbosity { RoutePickerColumn(title: "Response detail") {
                     Picker("Verbosity", selection: $draft.verbosity) {
                         ForEach(RoutingOptions.verbosities, id: \.self) { value in Text(value).tag(value) }
                     }.labelsHidden()
-                }.frame(maxWidth: 130)
+                }.frame(maxWidth: 130) }
             }
             if let selected {
-                Text(selected.capabilitySummary).font(.caption).foregroundStyle(MBColor.inkDim)
-                if efforts.isEmpty { Text("Reasoning metadata unavailable; refresh before saving.").font(.caption).foregroundStyle(MBColor.faultInk) }
-            } else { Text("Choose an available account model; the saved value has not been replaced automatically.").font(.caption).foregroundStyle(MBColor.faultInk) }
+                if showVerbosity { Text(selected.capabilitySummary).font(MBFont.caption).foregroundStyle(MBColor.inkDim) }
+                if efforts.isEmpty && showVerbosity { Text("Reasoning metadata unavailable; refresh before saving.").font(MBFont.caption).foregroundStyle(MBColor.faultInk) }
+            } else if showVerbosity { Text("Choose an available account model; the saved value has not been replaced automatically.").font(MBFont.caption).foregroundStyle(MBColor.faultInk) }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -873,15 +854,17 @@ private struct DiagnosticsSettingsTab: View {
 
     var body: some View {
         SettingsShell {
-            MBSection(title: "Traffic health") {
+            Text("Activity").font(MBFont.title).padding(.bottom, 20)
+            MBSection(title: "Recent traffic") {
                 kpiGrid
                     .padding(.top, 6)
             }
 
-            MBSection(title: "Runtime") {
-                MBField(label: "Last request") {
-                    valueText(model.lastRequestOutcome)
-                }
+            MBSection(title: "Last request") {
+                valueText(model.lastRequestOutcome).padding(.vertical, 12)
+                if !model.recentErrorReasons.isEmpty { valueText(joinedOrFallback(model.recentErrorReasons)) }
+            }
+            DisclosureGroup("Request details") {
                 MBField(label: "Recent stages") {
                     valueText(formatStagePairs(model.traceStageCounts), mono: true)
                 }
@@ -899,7 +882,7 @@ private struct DiagnosticsSettingsTab: View {
                 }
             }
 
-            MBSection(title: "Trace") {
+            DisclosureGroup("Trace log") {
                 MBField(
                     label: "Log file",
                     help: "Claudex appends one JSON object per line as requests flow through.",
@@ -992,4 +975,19 @@ private func formatStagePairs(_ values: [String: Int]) -> String {
 
 private func joinedOrFallback(_ values: [String]) -> String {
     values.isEmpty ? "—" : values.joined(separator: ", ")
+}
+
+/// SwiftUI Settings windows otherwise inherit a fixed content fitting size on macOS 15.
+private struct SettingsWindowSizing: NSViewRepresentable {
+    final class WindowView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.window?.styleMask.insert(.resizable)
+                self?.window?.contentMinSize = NSSize(width: 680, height: 520)
+            }
+        }
+    }
+    func makeNSView(context: Context) -> WindowView { WindowView() }
+    func updateNSView(_ nsView: WindowView, context: Context) {}
 }

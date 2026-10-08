@@ -100,10 +100,13 @@ final class AppModel: ObservableObject {
     @Published var routingRulesDraft: [RoutingRuleDraft] = []
     @Published var fallbackRouteDraft: RouteDraft
     @Published var advisorRouteDraft: RouteDraft
+    @Published var useAdvancedRouting = false
+    @Published var showConnectionInstructions = false
     @Published var routingSaveError: String?
     @Published var isRefreshingToken = false
     @Published var tokenRefreshError: String?
 
+    private let offlinePreview: Bool
     private let configurationStore: any ConfigurationStoring
     private let launchAtLoginController = LaunchAtLoginController()
     private var daemon: GatewayDaemon
@@ -122,8 +125,10 @@ final class AppModel: ObservableObject {
         },
         routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)? = nil,
         modelCatalog: SIWCModelCatalog = SIWCModelCatalog(),
-        automaticallyLoadCatalog: Bool = true
+        automaticallyLoadCatalog: Bool = true,
+        offlinePreview: Bool = false
     ) {
+        self.offlinePreview = offlinePreview
         self.configurationStore = configurationStore
         self.modelCatalog = modelCatalog
         self.subscriptionRefresherFactory = subscriptionRefresherFactory
@@ -148,6 +153,7 @@ final class AppModel: ObservableObject {
         self.daemon = GatewayDaemon(configuration: configuration)
         applyConfigurationStatus(configuration)
         syncDrafts(configuration)
+        if offlinePreview { return }
         refreshLaunchAtLogin()
         if automaticallyLoadCatalog { Task { await loadChatGPTAccounts() } }
         refresh()
@@ -390,10 +396,12 @@ final class AppModel: ObservableObject {
             else { resolveAuthBlockingState(for: "starting the gateway") }
             return
         }
+        if offlinePreview { daemonState = "running"; statusText = "Gateway running"; showConnectionInstructions = true; return }
         Task {
             do {
                 try await daemon.start()
-                await refreshSnapshot(runningText: "Claudex daemon running")
+                await refreshSnapshot(runningText: "Gateway running")
+                showConnectionInstructions = true
             } catch {
                 statusText = "Failed to start daemon: \(error.localizedDescription)"
             }
@@ -401,6 +409,7 @@ final class AppModel: ObservableObject {
     }
 
     func stopDaemon() {
+        if offlinePreview { daemonState = "stopped"; statusText = "Gateway paused"; return }
         Task {
             await daemon.stop()
             await refreshSnapshot(runningText: "Claudex daemon stopped")
@@ -416,6 +425,7 @@ final class AppModel: ObservableObject {
     }
 
     func restartDaemon() {
+        guard !offlinePreview else { return }
         guard canStartDaemon else {
             resolveAuthBlockingState(for: "restarting the gateway")
             return
@@ -433,6 +443,7 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() {
+        guard !offlinePreview else { return }
         Task {
             await refreshSnapshot(runningText: statusText)
         }
@@ -483,6 +494,7 @@ final class AppModel: ObservableObject {
     private let chatGPTSignIn = SIWCSignIn()
 
     func beginChatGPTSignIn(accountID: String? = nil) {
+        if offlinePreview { isSigningIn = true; signInError = nil; return }
         isSigningIn = true; signInError = nil
         chatGPTSignIn.onCompletion = { [weak self] result in
             guard let self else { return }
@@ -501,6 +513,7 @@ final class AppModel: ObservableObject {
         }
     }
     func cancelChatGPTSignIn() {
+        if offlinePreview { isSigningIn = false; return }
         Task { await chatGPTSignIn.cancel(); isSigningIn = false }
     }
     var modelCatalogUsable: Bool {
@@ -522,7 +535,7 @@ final class AppModel: ObservableObject {
         return routes.compactMap { snapshot.validationError(for: $0) }.first
     }
     var savedRoutingCatalogError: String? {
-        routingCatalogError(currentConfiguration.routingTable.rules.map(\.route) + [currentConfiguration.routingTable.fallback])
+        routingCatalogError((currentConfiguration.routingTable.singleModelMode == true ? [] : currentConfiguration.routingTable.rules.map(\.route)) + [currentConfiguration.routingTable.fallback])
     }
     func loadChatGPTModelCatalog(force: Bool = true) async {
         guard let expectedAccount = chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id,
@@ -541,6 +554,7 @@ final class AppModel: ObservableObject {
         }
     }
     func loadChatGPTAccounts(forceCatalogRefresh: Bool = false) async {
+        guard !offlinePreview else { return }
         do {
             let accounts = try await SIWCAuth.shared.accounts()
             chatGPTAccounts = accounts
@@ -558,12 +572,14 @@ final class AppModel: ObservableObject {
         }
     }
     func selectChatGPTAccount(_ id: String) {
+        if offlinePreview { daemonState = "stopped"; modelCatalogSnapshot = nil; availableChatGPTModels = []; modelCatalogError = "Account changed. Refresh models to continue."; return }
         Task {
             do { try await SIWCAuth.shared.select(id); await loadChatGPTAccounts(forceCatalogRefresh: true); refresh() }
             catch { signInError = error.localizedDescription }
         }
     }
     func signOutChatGPT(_ id: String) {
+        if offlinePreview { chatGPTAccounts = []; authState = .authorizationRequired; modelCatalogSnapshot = nil; availableChatGPTModels = []; daemonState = "stopped"; return }
         Task {
             do {
                 let revoked = try await SIWCAuth.shared.signOut(id)
@@ -645,7 +661,7 @@ final class AppModel: ObservableObject {
                 verbosity: draft.verbosity
             )
         }
-        guard trimmedRules.allSatisfy({ !$0.keyword.isEmpty }) else {
+        guard !useAdvancedRouting || trimmedRules.allSatisfy({ !$0.keyword.isEmpty }) else {
             routingSaveError = "Routing rule keywords cannot be empty"
             statusText = routingSaveError ?? statusText
             return
@@ -667,9 +683,10 @@ final class AppModel: ObservableObject {
                 upstreamModel: fallbackRouteDraft.upstreamModel,
                 reasoningEffort: fallbackRouteDraft.effort,
                 textVerbosity: fallbackRouteDraft.verbosity
-            )
+            ),
+            singleModelMode: !useAdvancedRouting
         )
-        if let error = routingCatalogError(table.rules.map(\.route) + [table.fallback]) {
+        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) : []) + [table.fallback]) {
             routingSaveError = error; statusText = error; return
         }
         let advisor = ModelRoute(
@@ -703,13 +720,14 @@ final class AppModel: ObservableObject {
         syncDrafts(saved)
         if let routingUpdateApplier {
             await routingUpdateApplier(table, advisor)
-        } else {
+        } else if !offlinePreview {
             await daemon.applyRoutingUpdate(table: table, advisorRoute: advisor)
         }
         await refreshSnapshot(runningText: "Routing and upstream settings saved")
     }
 
     func refreshTokenNow() async {
+        guard !offlinePreview else { return }
         guard !isRefreshingToken else { return }
         isRefreshingToken = true
         tokenRefreshError = nil
@@ -729,6 +747,7 @@ final class AppModel: ObservableObject {
     }
 
     func startTokenStatusPolling() async {
+        guard !offlinePreview else { return }
         while !Task.isCancelled {
             await refreshSnapshot(runningText: statusText)
             try? await Task.sleep(for: .seconds(30))
@@ -736,6 +755,7 @@ final class AppModel: ObservableObject {
     }
 
     func regenerateGatewayToken() {
+        guard !offlinePreview else { return }
         Task {
             let wasRunning = daemonIsRunning
             let saved = configurationStore.regenerateGatewayToken(from: currentConfiguration)
@@ -750,12 +770,13 @@ final class AppModel: ObservableObject {
         currentConfiguration = configuration
         applyConfigurationStatus(configuration)
         syncDrafts(configuration)
-        refreshLaunchAtLogin()
+        if !offlinePreview { refreshLaunchAtLogin() }
         statusText = "Configuration reloaded"
         refresh()
     }
 
     func toggleLaunchAtLogin() {
+        guard !offlinePreview else { return }
         do {
             try launchAtLoginController.setEnabled(!launchAtLoginEnabled)
             refreshLaunchAtLogin()
@@ -792,7 +813,8 @@ final class AppModel: ObservableObject {
                     upstreamModel: executorModel,
                     reasoningEffort: existingTable.fallback.reasoningEffort,
                     textVerbosity: existingTable.fallback.textVerbosity
-                )
+                ),
+                singleModelMode: existingTable.singleModelMode
             )
             let existingAdvisor = currentConfiguration.advisorRoute
             let updatedAdvisor = ModelRoute(
@@ -870,6 +892,7 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshSnapshot(runningText: String) async {
+        guard !offlinePreview else { return }
         let snapshot = await daemon.snapshot()
         daemonState = snapshot.daemonState
         endpoint = "http://\(snapshot.host):\(snapshot.port)"
@@ -880,7 +903,7 @@ final class AppModel: ObservableObject {
         configurationWarning = snapshot.configurationWarning
         subscriptionAuthFilePath = snapshot.subscriptionAuthFilePath
         authState = snapshot.authState
-        gatewayTokenText = "\(snapshot.gatewayAuthHeader) ready (\(snapshot.gatewayAuthTokenSuffix))"
+        gatewayTokenText = "Configured · hidden"
         traceStageCounts = snapshot.traceDiagnostics.recentStageCounts
         recentFunctionCallNames = snapshot.traceDiagnostics.recentFunctionCallNames
         recentConnectorNames = snapshot.traceDiagnostics.recentConnectorNames
@@ -910,7 +933,7 @@ final class AppModel: ObservableObject {
         configurationPath = configuration.configurationPath
         configurationWarning = configuration.configurationWarning
         subscriptionAuthFilePath = configuration.subscriptionAuthFilePath
-        gatewayTokenText = "\(configuration.gatewayAuthHeader) ready (\(configuration.gatewayAuthTokenSuffix))"
+        gatewayTokenText = "Configured · hidden"
         doctorNotes = makeDoctorNotes(configurationWarning: configuration.configurationWarning)
     }
 
@@ -925,6 +948,7 @@ final class AppModel: ObservableObject {
 
     func syncRoutingDraftsFromConfiguration(_ configuration: RouterConfiguration? = nil) {
         let configuration = configuration ?? currentConfiguration
+        useAdvancedRouting = configuration.routingTable.singleModelMode.map { !$0 } ?? configuration.routingTable.rules.contains { $0.route != configuration.routingTable.fallback }
         routingRulesDraft = configuration.routingTable.rules.map { rule in
             RoutingRuleDraft(
                 keyword: rule.match,
@@ -1022,364 +1046,103 @@ final class AppModel: ObservableObject {
     }
 }
 
-// MARK: - Menu bar popover (ContentView)
+#if DEBUG
+private final class PreviewConfigurationStore: ConfigurationStoring {
+    var value: RouterConfiguration
+    init(_ value: RouterConfiguration) { self.value = value }
+    func loadOrCreate() -> RouterConfiguration { value }
+    func save(configuration: RouterConfiguration) -> RouterConfiguration { value = configuration; return value }
+    func regenerateGatewayToken(from configuration: RouterConfiguration) -> RouterConfiguration { configuration }
+}
+
+extension AppModel {
+    static func visualFixture(_ state: String) -> AppModel {
+        let route = ModelRoute(upstreamModel: state == "retired" ? "retired-model" : "gpt-6-luna", reasoningEffort: state == "unsupported" ? "ultra" : "low", textVerbosity: "low")
+        let config = RouterConfiguration(host: "127.0.0.1", port: 4317, healthPath: "/health", messagesPath: "/v1/messages", countTokensPath: "/v1/messages/count_tokens", responsesURL: "https://api.openai.com/v1/responses", routingTable: ModelRoutingTable(rules: [], fallback: route, singleModelMode: true), advisorRoute: route, gatewayAuthToken: "fixture-only-not-a-credential", gatewayAuthHeader: "x-mb-token", subscriptionAuthFilePath: "/tmp/claudex-ui/fixture-auth-unused", configurationPath: "/tmp/claudex-ui/fixture-config-unused", configurationWarning: nil)
+        let catalog = SIWCModelCatalog(directory: URL(fileURLWithPath: "/tmp/claudex-ui/catalog-fixture"), loader: { throw SIWCError.remote("Fixture catalog unavailable. Try refreshing.") })
+        let model = AppModel(configurationStore: PreviewConfigurationStore(config), modelCatalog: catalog, automaticallyLoadCatalog: false, offlinePreview: true)
+        model.tracePath = "/tmp/claudex-ui/fixture-trace-unused"
+        model.authState = .ready; model.authText = "ChatGPT connected"; model.statusText = "Gateway paused"
+        model.chatGPTAccounts = [SIWCAccountSummary(id: "demo-account", label: "Alex · Personal workspace", clientID: "fixture-client", active: true, authorized: true)]
+        let json = """
+        {"accountID":"demo-account","fetchedAt":\(Date().timeIntervalSinceReferenceDate),"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","accountID":"demo-account","details":{"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"supports_parallel_tool_calls":true,"support_verbosity":true}},{"id":"gpt-6-sol","label":"GPT-6 Sol","accountID":"demo-account","details":{"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}]}}]}
+        """
+        let snapshot = try! JSONDecoder().decode(SIWCModelCatalogSnapshot.self, from: Data(json.utf8))
+        model.modelCatalogSnapshot = snapshot; model.availableChatGPTModels = snapshot.models
+        switch state {
+        case "signedOut": model.chatGPTAccounts = []; model.authState = .authorizationRequired; model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []
+        case "signingIn": model.chatGPTAccounts = []; model.authState = .authorizationRequired; model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.isSigningIn = true
+        case "authError": model.chatGPTAccounts = []; model.authState = .authorizationRequired; model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.signInError = "Connection was interrupted. Connect ChatGPT to try again."
+        case "loading": model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.isLoadingModelCatalog = true
+        case "catalogError", "switched": model.modelCatalogSnapshot = nil; model.availableChatGPTModels = []; model.modelCatalogError = "Could not load models for this account. Refresh to try again."
+        case "running": model.daemonState = "running"; model.statusText = "Gateway running"; model.showConnectionInstructions = true
+        case "gatewayError": model.statusText = "Failed to start gateway: port 4317 is already in use. Pause the other gateway or change the port in Gateway settings."
+        default: break
+        }
+        return model
+    }
+}
+#endif
+
+// MARK: - Menu bar popover
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
-
     var body: some View {
-        VStack(spacing: 0) {
-            headerSection
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 12)
-                .overlay(Divider().frame(height: 0.5), alignment: .bottom)
-
-            bridgeSection
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-
-            Group {
-                if model.requiresAuthAttention {
-                    authActionSection
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                }
-                if model.isUpstreamReady {
-                    kpiSection
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                    recentSection
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
-                    routingInsightsSection
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                        .padding(.bottom, 10)
-                }
-            }
-            .animation(.easeInOut(duration: 0.25), value: model.isUpstreamReady)
-            .animation(.easeInOut(duration: 0.25), value: model.requiresAuthAttention)
-
-            footerSection
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(MBColor.paperDim)
-                .overlay(Divider().frame(height: 0.5), alignment: .top)
-        }
-        .frame(width: 380)
-        .background(MBColor.paper)
-    }
-
-    // MARK: Sections
-
-    private var headerSection: some View {
-        HStack(alignment: .center, spacing: 10) {
-            MBBridgeBadge(size: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Model Bridge")
-                    .font(MBFont.title)
-                    .foregroundStyle(MBColor.ink)
-                HStack(spacing: 6) {
-                    MBDot(state: model.headerDotState, size: 6)
-                    Text(model.headerStatusText)
-                        .font(.system(size: 11))
-                        .foregroundStyle(MBColor.inkDim)
-                        .lineLimit(1)
-                    Text("·").foregroundStyle(MBColor.inkFaint)
-                    Text(model.appVersion)
-                        .font(MBFont.monoSmall)
-                        .foregroundStyle(MBColor.inkDim)
-                }
-            }
-            Spacer(minLength: 0)
-            Toggle("", isOn: Binding(
-                get: { model.daemonIsRunning },
-                set: { _ in model.toggleDaemon() }
-            ))
-            .toggleStyle(MBToggleStyle())
-            .labelsHidden()
-            .fixedSize()
-            .disabled(!model.canStartDaemon)
-        }
-    }
-
-    private var bridgeSection: some View {
-        MBCard(padding: 10) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
-                clientCell
-                MBFlowLine(running: model.daemonIsRunning, color: MBColor.live)
-                    .frame(maxWidth: .infinity)
-                upstreamCell
-            }
-        }
-    }
-
-    private var clientCell: some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(model.daemonIsRunning ? MBColor.live : MBColor.inkFaint)
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Claude Code")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MBColor.ink)
-                Text(model.endpointShortLabel)
-                    .font(MBFont.monoSmall)
-                    .foregroundStyle(MBColor.inkDim)
-            }
-        }
-        .frame(width: 132, alignment: .leading)
-    }
-
-    private var upstreamCell: some View {
-        HStack(spacing: 6) {
-            Spacer(minLength: 0)
-            MBPill(text: model.upstreamDisplayName, tone: .neutral)
-        }
-        .frame(maxWidth: 120)
-    }
-
-    private var kpiSection: some View {
-        MBCard(padding: 12, background: MBColor.paperDim) {
-            HStack(alignment: .top, spacing: 14) {
-                MBKpi(
-                    label: "Requests",
-                    value: "\(model.recentRequestCount)",
-                    detail: "\(model.formattedRequestsPerMinute) / min"
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle().fill(MBColor.ruleSoft).frame(width: 0.5)
-
-                MBKpi(
-                    label: "Success",
-                    value: model.recentRequestCount == 0 ? "—" : percentString(model.successRate),
-                    detail: model.recentRequestCount == 0
-                        ? MBCopy.trafficEmptyShort
-                        : "\(model.recentSuccessCount) ok · \(model.recentFailureCount) err",
-                    tone: model.recentFailureCount > 0 ? .warn : .live
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle().fill(MBColor.ruleSoft).frame(width: 0.5)
-
-                MBKpi(
-                    label: "Latency",
-                    value: lastLatencyDisplay,
-                    detail: latencyDetail
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var authActionSection: some View {
-        MBCard(padding: 12, background: MBColor.paperDim) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "key.horizontal")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(MBColor.brand)
-                    Text(model.authActionTitle)
-                        .font(MBFont.labelB)
-                        .foregroundStyle(MBColor.ink)
+                MBBridgeBadge(size: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Claudex").font(MBFont.title)
+                    Label(model.daemonIsRunning ? "Gateway running" : "Gateway paused", systemImage: model.daemonIsRunning ? "circle.fill" : "pause.circle")
+                        .font(MBFont.caption).foregroundStyle(model.daemonIsRunning ? MBColor.liveInk : MBColor.inkDim)
                 }
-                Text(model.authText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(MBColor.inkDim)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(model.authInstructionText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(MBColor.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    Button(action: { model.beginChatGPTSignIn() }) {
-                        Label(model.authResolutionLabel, systemImage: model.authResolutionSystemImage)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(MBColor.brand)
-                    .controlSize(.regular)
-                    SettingsLink {
-                        Label("Open Settings", systemImage: "gearshape")
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MBColor.brand)
+                Spacer()
+                Button(model.daemonIsRunning ? "Pause" : "Start") { model.toggleDaemon() }
+                    .buttonStyle(.borderedProminent).disabled(!model.canStartDaemon)
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Claude Code → ChatGPT").font(MBFont.labelB)
+                Text(model.currentConfiguration.executorModel + " · " + model.currentConfiguration.routingTable.fallback.reasoningEffort)
+                    .font(MBFont.mono).textSelection(.enabled)
+                Text(model.chatGPTAccounts.first(where: { $0.active && $0.authorized })?.label ?? "Connect your ChatGPT account")
+                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim).lineLimit(2)
+            }
+            if model.isSigningIn {
+                HStack { ProgressView().controlSize(.small); Text("Finish connecting in your browser"); Button("Cancel") { model.cancelChatGPTSignIn() } }
+            } else if !model.isUpstreamReady {
+                Button("Connect ChatGPT") { model.beginChatGPTSignIn() }.buttonStyle(.borderedProminent)
+            }
+            if let error = model.signInError ?? model.savedRoutingCatalogError {
+                Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).fixedSize(horizontal: false, vertical: true)
+                SettingsLink { Text("Review account & model") }
+            }
+            if model.statusText.hasPrefix("Failed") { Text(model.statusText).foregroundStyle(MBColor.faultInk).font(MBFont.caption) }
+            if model.showConnectionInstructions && model.daemonIsRunning {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Connect Claude Code").font(MBFont.labelB)
+                    Text("Copy the two exports into your terminal, then launch Claude Code. Requests use your plan.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            MBSectionHeader(
-                title: "Recent activity",
-                trailing: AnyView(
-                    Button(action: { model.openTraceLocation() }) {
-                        HStack(spacing: 3) {
-                            Text("Open trace")
-                            Image(systemName: "arrow.up.right")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MBColor.brand)
-                )
-            )
-            .padding(.horizontal, 4)
-
-            MBCard(padding: 0) {
-                VStack(spacing: 0) {
-                    if recentLines.isEmpty {
-                        Text(MBCopy.trafficEmptyLong)
-                            .font(.system(size: 11))
-                            .foregroundStyle(MBColor.inkDim)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                    } else {
-                        ForEach(Array(recentLines.enumerated()), id: \.offset) { index, line in
-                            let summary = TraceLineFormatter.summary(line)
-                            HStack(spacing: 8) {
-                                MBDot(state: summary.toneForStatus, size: 5)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(summary.message)
-                                        .font(MBFont.mono)
-                                        .foregroundStyle(MBColor.ink)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                    if let ts = summary.timestamp {
-                                        Text(ts)
-                                            .font(MBFont.monoSmall)
-                                            .foregroundStyle(MBColor.inkDim)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                if let code = summary.statusCode {
-                                    Text("\(code)")
-                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                        .foregroundStyle(code >= 400 ? MBColor.faultInk : MBColor.inkDim)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 3)
-                                                .fill(code >= 400 ? MBColor.faultSoft : MBColor.paperDim)
-                                        )
-                                }
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            if index < recentLines.count - 1 {
-                                Rectangle().fill(MBColor.ruleSoft).frame(height: 0.5)
-                            }
-                        }
-                    }
-                }
+            HStack {
+                MBKpi(label: "Requests", value: "\(model.recentRequestCount)")
+                Spacer()
+                MBKpi(label: "Failures", value: "\(model.recentFailureCount)")
+                Spacer()
+                MBKpi(label: "Last latency", value: model.lastLatencyMilliseconds.map { "\($0) ms" } ?? "—")
             }
+            Text(model.recentRequestCount == 0 ? "No requests yet" : model.lastRequestOutcome).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+            Divider()
+            HStack {
+                SettingsLink { Label("Settings", systemImage: "gearshape") }
+                Spacer()
+                Button("Copy connection") { model.copyEnvSnippet() }.disabled(!model.isUpstreamReady)
+                Button("Quit") { model.quit() }
+            }.buttonStyle(.borderless)
         }
-    }
-
-    private var routingInsightsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            MBSectionHeader(title: "Routing insights")
-                .padding(.horizontal, 4)
-
-            MBCard(padding: 10, background: MBColor.paperDim) {
-                VStack(spacing: 0) {
-                    ForEach(Array(model.routingInsights.enumerated()), id: \.element.claudeModelKey) { index, row in
-                        HStack(alignment: .center, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.displayName)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(MBColor.ink)
-                                Text("→ \(row.currentRouteLabel)")
-                                    .font(MBFont.monoSmall)
-                                    .foregroundStyle(MBColor.inkDim)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Text(routingInsightMetricText(row.metrics))
-                                .font(MBFont.monoSmall)
-                                .foregroundStyle(row.metrics == nil ? MBColor.inkFaint : MBColor.inkMid)
-                                .lineLimit(1)
-                        }
-                        .padding(.vertical, 6)
-                        if index < model.routingInsights.count - 1 {
-                            Rectangle().fill(MBColor.ruleSoft).frame(height: 0.5)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var footerSection: some View {
-        HStack(spacing: 6) {
-            if model.isUpstreamReady {
-                FooterButton(
-                    systemImage: model.primaryActionSystemImage,
-                    label: model.primaryActionLabel,
-                    action: {
-                        if model.daemonIsRunning {
-                            model.toggleDaemon()
-                        } else if model.isUpstreamReady {
-                            model.toggleDaemon()
-                        } else {
-                            model.beginChatGPTSignIn()
-                        }
-                    },
-                    isDisabled: model.authState == nil
-                )
-                FooterButton(
-                    systemImage: "doc.on.doc",
-                    label: "Copy env",
-                    action: { model.copyEnvSnippet() },
-                    isDisabled: !model.isUpstreamReady
-                )
-            }
-            Spacer(minLength: 0)
-            SettingsLink {
-                FooterButtonLabel(systemImage: "gearshape", label: "Settings")
-            }
-            .buttonStyle(.plain)
-            FooterButton(
-                systemImage: "rectangle.portrait.and.arrow.right",
-                label: "Quit",
-                action: { model.quit() }
-            )
-        }
-    }
-
-    // MARK: Helpers
-
-    private var recentLines: [String] {
-        Array(model.recentTraceLines.suffix(5).reversed())
-    }
-
-    private var lastLatencyDisplay: String {
-        if let last = model.lastLatencyMilliseconds { return "\(last) ms" }
-        if let p50 = model.p50LatencyMilliseconds { return "\(p50) ms" }
-        return "—"
-    }
-
-    private var latencyDetail: String {
-        if let p95 = model.p95LatencyMilliseconds { return "p95 \(p95) ms" }
-        if let p50 = model.p50LatencyMilliseconds { return "p50 \(p50) ms" }
-        return "No samples"
-    }
-
-    private func percentString(_ value: Double) -> String {
-        let bounded = max(0, min(1, value))
-        return String(format: "%.0f%%", bounded * 100)
-    }
-
-    private func routingInsightMetricText(_ metrics: ClaudeModelMetrics?) -> String {
-        guard let metrics else { return "—" }
-        let latency = metrics.p50LatencyMilliseconds.map { "\($0) ms" } ?? "—"
-        return "\(metrics.requestCount) req · \(latency)"
+        .font(MBFont.label).tint(MBColor.brand).accentColor(MBColor.brand).padding(18).frame(width: 400).background(MBColor.paper).tint(MBColor.brand)
     }
 }
 

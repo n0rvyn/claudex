@@ -100,7 +100,7 @@ struct RouterConfigurationMigrationTests {
     }
 
     @Test
-    func freshInstallGetsDefaultThreeRuleTable() throws {
+    func freshInstallUsesSingleModelAndPreservesAdvancedRules() throws {
         // No config.json and no env override — loadOrCreate must synthesize ModelRoutingTable.defaultTable.
         // This is required for Phase 2 acceptance #4+#5 (opus/sonnet/haiku fan-out).
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -116,11 +116,12 @@ struct RouterConfigurationMigrationTests {
 
         let configuration = store.loadOrCreate()
 
-        #expect(configuration.routingTable == ModelRoutingTable.defaultTable)
+        #expect(configuration.routingTable.rules == ModelRoutingTable.defaultTable.rules)
+        #expect(configuration.routingTable.singleModelMode == true)
         #expect(configuration.routingTable.rules.count == 3)
         #expect(configuration.routingTable.resolve(for: "claude-opus-4-7").upstreamModel == "gpt-5.4")
         #expect(configuration.routingTable.resolve(for: "claude-sonnet-4-6").upstreamModel == "gpt-5.4")
-        #expect(configuration.routingTable.resolve(for: "claude-haiku-4-5-20251001").upstreamModel == "gpt-5.3-codex-spark")
+        #expect(configuration.routingTable.resolve(for: "claude-haiku-4-5-20251001") == configuration.routingTable.fallback)
         #expect(configuration.advisorRoute == ModelRoutingTable.defaultAdvisorRoute)
     }
 

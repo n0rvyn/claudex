@@ -4,20 +4,20 @@ import SwiftUI
 
 enum MBColor {
     // Surfaces — warm cream paper tones (light) with dark graphite equivalents.
-    static let paper      = dynamic(light: rgb(0xFCFAF6), dark: rgb(0x1C1B18))
-    static let paperDim   = dynamic(light: rgb(0xF5F2ED), dark: rgb(0x242320))
-    static let paperDeep  = dynamic(light: rgb(0xEDEAE4), dark: rgb(0x2B2A26))
-    static let paperAlt   = dynamic(light: rgb(0xFEFDFB), dark: rgb(0x212020))
+    static let paper      = dynamic(light: rgb(0xF7F7F8), dark: rgb(0x202124))
+    static let paperDim   = dynamic(light: rgb(0xEEEEF0), dark: rgb(0x27282C))
+    static let paperDeep  = dynamic(light: rgb(0xE4E4E8), dark: rgb(0x303136))
+    static let paperAlt   = dynamic(light: rgb(0xFFFFFF), dark: rgb(0x26272B))
 
     // Borders / dividers
-    static let rule       = dynamic(light: rgb(0xE2DED6), dark: rgb(0x39372F))
-    static let ruleSoft   = dynamic(light: rgb(0xEAE6DE), dark: rgb(0x2E2D28))
+    static let rule       = dynamic(light: rgb(0xDDDDE2), dark: rgb(0x3C3D43))
+    static let ruleSoft   = dynamic(light: rgb(0xE5E5E9), dark: rgb(0x34353A))
 
     // Text
-    static let ink        = dynamic(light: rgb(0x2B2821), dark: rgb(0xEFECE3))
-    static let inkMid     = dynamic(light: rgb(0x625D52), dark: rgb(0xB6B1A4))
-    static let inkDim     = dynamic(light: rgb(0x908C82), dark: rgb(0x8E8A80))
-    static let inkFaint   = dynamic(light: rgb(0xBBB7AD), dark: rgb(0x6A665E))
+    static let ink        = dynamic(light: rgb(0x202124), dark: rgb(0xF3F3F5))
+    static let inkMid     = dynamic(light: rgb(0x55565E), dark: rgb(0xC3C4CB))
+    static let inkDim     = dynamic(light: rgb(0x64656D), dark: rgb(0xAAABB4))
+    static let inkFaint   = dynamic(light: rgb(0x888991), dark: rgb(0x85868F))
 
     // Accents — consistent lightness across light/dark where possible.
     static let live       = Color(red: 0.32, green: 0.70, blue: 0.56)   // teal green
@@ -60,15 +60,15 @@ enum MBColor {
 
 enum MBFont {
     static let ui        = Font.system(.body)
-    static let caption   = Font.system(size: 11, weight: .medium)
-    static let captionB  = Font.system(size: 11, weight: .semibold)
-    static let label     = Font.system(size: 13, weight: .medium)
+    static let caption   = Font.system(size: 12)
+    static let captionB  = Font.system(size: 12, weight: .semibold)
+    static let label     = Font.system(size: 13)
     static let labelB    = Font.system(size: 13, weight: .semibold)
-    static let title     = Font.system(size: 14, weight: .semibold)
-    static let section   = Font.system(size: 11, weight: .semibold)
-    static let kpiNumber = Font.system(size: 20, weight: .semibold, design: .monospaced)
+    static let title     = Font.system(size: 16, weight: .semibold)
+    static let section   = Font.system(size: 12, weight: .semibold)
+    static let kpiNumber = Font.system(size: 18, weight: .semibold, design: .monospaced)
     static let mono      = Font.system(size: 12, design: .monospaced)
-    static let monoSmall = Font.system(size: 10, design: .monospaced)
+    static let monoSmall = Font.system(size: 12, design: .monospaced)
 }
 
 // MARK: - Dot
@@ -208,7 +208,7 @@ struct MBBanner<Actions: View>: View {
                     .foregroundStyle(MBColor.ink)
                 if let message {
                     Text(message)
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(MBColor.inkMid)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -270,9 +270,9 @@ struct MBSectionHeader: View {
 
     var body: some View {
         HStack {
-            Text(title.uppercased())
+            Text(title)
                 .font(MBFont.section)
-                .tracking(0.6)
+
                 .foregroundStyle(MBColor.inkDim)
             Spacer(minLength: 0)
             if let trailing { trailing }
@@ -287,26 +287,11 @@ struct MBBridgeBadge: View {
     var cornerRadius: CGFloat = 8
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [MBColor.live, MBColor.brand.opacity(0.85)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: size * 0.5, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: size, height: size)
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-                .blendMode(.overlay)
-        )
-        .shadow(color: MBColor.brand.opacity(0.25), radius: 3, x: 0, y: 1)
+        Image(systemName: "terminal.fill")
+            .font(.system(size: size * 0.5, weight: .medium))
+            .foregroundStyle(MBColor.brand)
+            .frame(width: size, height: size)
+            .background(MBColor.brandSoft, in: RoundedRectangle(cornerRadius: cornerRadius))
     }
 }
 
@@ -320,9 +305,9 @@ struct MBKpi: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.5)
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+
                 .foregroundStyle(MBColor.inkDim)
             Text(value)
                 .font(MBFont.kpiNumber)
@@ -331,7 +316,7 @@ struct MBKpi: View {
                 .minimumScaleFactor(0.7)
             if let detail {
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(.system(size: 12))
                     .foregroundStyle(toneForeground)
                     .lineLimit(1)
             }
@@ -365,34 +350,24 @@ struct MBField<Content: View>: View {
                 content
                 if let help {
                     Text(help)
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(MBColor.inkDim)
                 }
             }
             .padding(.vertical, 8)
         } else {
-            HStack(alignment: .firstTextBaseline, spacing: 18) {
-                VStack(alignment: .leading, spacing: 3) {
-                    labelRow(font: MBFont.label)
-                    if let help {
-                        Text(help)
-                            .font(.system(size: 11))
-                            .foregroundStyle(MBColor.inkDim)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    labelRow(font: MBFont.label).frame(width: 135, alignment: .leading)
+                    content.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(width: 200, alignment: .leading)
-
-                content
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let help {
+                    Text(help).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .padding(.vertical, 10)
-            .overlay(
-                Rectangle()
-                    .fill(MBColor.ruleSoft)
-                    .frame(height: 0.5)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-            )
+            .padding(.vertical, 12)
+            .overlay(Rectangle().fill(MBColor.ruleSoft).frame(height: 0.5), alignment: .bottom)
         }
     }
 
@@ -417,9 +392,9 @@ struct MBSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.6)
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+
                 .foregroundStyle(MBColor.inkDim)
             VStack(alignment: .leading, spacing: 0) {
                 content
@@ -487,7 +462,7 @@ struct MBTerminalLogLine: View {
             }
             if let level {
                 Text(level.uppercased())
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(levelColor(level))
                     .frame(width: 44, alignment: .leading)
             }
