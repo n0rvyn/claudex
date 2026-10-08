@@ -35,6 +35,7 @@ struct DoctorSettingsView: View {
             SettingsFooter(model: model)
         }.font(MBFont.label).tint(MBColor.brand).accentColor(MBColor.brand).background(MBColor.paper).tint(MBColor.brand)
         .background(SettingsWindowSizing())
+        .disclosureGroupStyle(WholeRowDisclosureStyle())
         .onAppear {
             #if DEBUG
             switch ProcessInfo.processInfo.environment["CLAUDEX_UI_PANE"] {
@@ -506,7 +507,6 @@ private struct ClaudeCodeSettingsTab: View {
 private struct UpstreamSettingsTab: View {
     @ObservedObject var model: AppModel
     @State private var optionsExpanded = false
-    @State private var metadataExpanded = false
     private var draftError: String? {
         let route = ModelRoute(upstreamModel: model.fallbackRouteDraft.upstreamModel, reasoningEffort: model.fallbackRouteDraft.effort, textVerbosity: model.fallbackRouteDraft.verbosity)
         if !model.useAdvancedRouting, model.modelCatalogUsable {
@@ -567,20 +567,16 @@ private struct UpstreamSettingsTab: View {
                     Toggle("Allow Claude to adjust", isOn: $model.allowClaudeAdjustment)
                     Text(model.allowClaudeAdjustment ? "Chosen effort is the default and maximum. Claude may request a lower supported effort. Thinking budgets cannot be translated." : "Chosen model and effort are fixed. Claude’s effort and thinking settings are overridden.")
                         .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                    MappingColumnHeader(adjustable: model.allowClaudeAdjustment)
                     if !model.useAdvancedRouting {
-                        RouteDraftPickers(draft: $model.fallbackRouteDraft, showVerbosity: false, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
-                        Text("One model handles all Claude Code model choices. Tools and permissions stay in Claude Code.")
-                            .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                        MappingRouteRow(title: "All roles", draft: $model.fallbackRouteDraft, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
                     } else {
                         ForEach(["opus", "sonnet", "haiku"], id: \.self) { keyword in
                             ClaudeModelRouteRow(model: model, keyword: keyword, onFocus: { proxy.scrollTo(keyword, anchor: .center) }).id(keyword)
                         }
-                        Text("Other Claude models").font(.system(size: 13, weight: .medium))
-                        RouteDraftPickers(draft: $model.fallbackRouteDraft, showVerbosity: false, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
-                        DisclosureGroup(model.hasCustomRoutingRules ? "Custom source aliases & rules" : "Custom source alias") {
-                            Text("Match another source name. Custom rules retain their ordered matching behavior.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                            RoutingPolicyEditor(model: model).environmentObject(model)
-                        }
+                        Divider().padding(.vertical, 4)
+                        MappingRouteRow(title: "Other", draft: $model.fallbackRouteDraft, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
+                        Text("Fallback for Claude model names that have no matching rule.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
                     }
                     if model.modelCatalogUsable, model.routingSaveError == nil, let error = draftError { Text(error).font(MBFont.caption).foregroundStyle(MBColor.faultInk).textSelection(.enabled) }
                     Text(model.mappingSaveStatus).font(MBFont.caption).foregroundStyle(model.routingSaveError == nil ? MBColor.inkDim : MBColor.faultInk)
@@ -598,27 +594,18 @@ private struct UpstreamSettingsTab: View {
                 Text("Paste the connection exports into your terminal, then launch Claude Code. Requests use your ChatGPT plan.").font(MBFont.caption)
                 HStack { Button("Copy connection exports") { model.copyEnvSnippet() }; Button("Done") { model.showConnectionInstructions = false } }.padding(.vertical, 10)
             }
-            DisclosureGroup("Model details", isExpanded: $metadataExpanded) {
-                VStack(alignment: .leading, spacing: 12) {
-                    let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) : []) + [model.fallbackRouteDraft.upstreamModel])
-                    ForEach(model.availableChatGPTModels.filter { ids.contains($0.id) }) { item in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(item.label).font(.system(size: 14, weight: .semibold))
-                            Text(item.id).font(MBFont.mono).textSelection(.enabled)
-                            Text("Supported efforts · " + (item.scalarReasoningEfforts.isEmpty ? "Unavailable" : item.scalarReasoningEfforts.joined(separator: ", ")))
-                            Text("Account suggested effort · " + (item.details.string("default_reasoning_level") ?? "Unavailable"))
-                            Text(item.capabilitySummary).foregroundStyle(MBColor.inkDim)
-                            DisclosureGroup("Raw metadata") { Text(item.detailsText).font(MBFont.mono).textSelection(.enabled) }
-                        }
-                    }
-                    Text("Source · selected account’s OpenAI model catalog").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                    Text(model.modelCatalogStatus).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
-                }.padding(.top, 10)
-            }
-            DisclosureGroup("Response options", isExpanded: $optionsExpanded) {
-                Picker("Response detail for other / all models", selection: $model.fallbackRouteDraft.verbosity) {
+            SelectedModelHints(model: model)
+            DisclosureGroup("Advanced routing") {
+                Text("Custom source names and ordered matching rules. Existing mappings are preserved.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                RoutingPolicyEditor(model: model).environmentObject(model)
+            }.padding(.top, 14)
+            DisclosureGroup("Answer detail", isExpanded: $optionsExpanded) {
+                Text(model.useAdvancedRouting ? "Applies only to the Other fallback. Role mappings retain their own saved answer detail." : "Applies to all roles using the shared model.")
+                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                Text("Controls response length and detail, separately from reasoning effort.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                Picker("Answer detail", selection: $model.fallbackRouteDraft.verbosity) {
                     ForEach(RoutingOptions.verbosities, id: \.self) { Text($0).tag($0) }
-                }.padding(.top, 10)
+                }.padding(.top, 6)
             }.padding(.top, 8)
         }
         .onAppear { model.enableMappingAutosave() }
@@ -644,10 +631,7 @@ private struct ClaudeModelRouteRow: View {
         })
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(keyword.capitalized).font(.system(size: 13, weight: .medium))
-            RouteDraftPickers(draft: route, showVerbosity: false, onFocus: onFocus).environmentObject(model)
-        }
+        MappingRouteRow(title: keyword.capitalized, draft: route, onFocus: onFocus).environmentObject(model)
     }
 }
 
@@ -953,6 +937,16 @@ private struct DiagnosticsSettingsTab: View {
             } label: {
                 Text("Trace log").font(.system(size: 14, weight: .semibold)).foregroundStyle(MBColor.ink)
             }.padding(.vertical, 8)
+            DisclosureGroup("Model catalog diagnostics") {
+                Text("Raw account model metadata for troubleshooting. Changing these disclosures does not change routing.").font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                Text(model.modelCatalogStatus).font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+                ForEach(model.availableChatGPTModels) { item in
+                    DisclosureGroup(item.label + " · Raw metadata") {
+                        Text(item.detailsText).font(MBFont.mono).textSelection(.enabled)
+                    }
+                }
+            }.padding(.vertical, 8)
+
         }
     }
 
@@ -1066,4 +1060,86 @@ private struct SettingsWindowSizing: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> WindowView { WindowView() }
     func updateNSView(_ nsView: WindowView, context: Context) {}
+}
+
+private struct MappingColumnHeader: View {
+    let adjustable: Bool
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Claude Code").frame(width: 76, alignment: .leading)
+            Color.clear.frame(width: 12, height: 1)
+            Text("OpenAI model").frame(maxWidth: .infinity, alignment: .leading)
+            Text(adjustable ? "Effort limit" : "Fixed effort").frame(width: 100, alignment: .leading)
+        }.font(MBFont.captionB).foregroundStyle(MBColor.inkDim).padding(.top, 10)
+    }
+}
+
+private struct MappingRouteRow: View {
+    let title: String
+    @Binding var draft: RouteDraft
+    var onFocus: () -> Void = {}
+    @EnvironmentObject private var model: AppModel
+    private enum Field: Hashable { case model, effort }
+    @FocusState private var focus: Field?
+    private var selected: SIWCModelSummary? { model.availableChatGPTModels.first { $0.id == draft.upstreamModel } }
+    private var efforts: [String] { selected?.scalarReasoningEfforts ?? [] }
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title).font(.system(size: 13, weight: .semibold)).frame(width: 76, alignment: .leading)
+            Image(systemName: "arrow.right").font(.system(size: 11)).foregroundStyle(MBColor.inkFaint).frame(width: 12).accessibilityHidden(true)
+            Picker(title + " OpenAI model", selection: $draft.upstreamModel) {
+                if selected == nil { Text("Unavailable: " + draft.upstreamModel).tag(draft.upstreamModel).disabled(true) }
+                ForEach(model.availableChatGPTModels) { item in Text(item.label).tag(item.id) }
+            }.labelsHidden().frame(maxWidth: .infinity).focused($focus, equals: .model).disabled(!model.modelCatalogUsable)
+                .onChange(of: draft.upstreamModel) { _, _ in if !efforts.contains(draft.effort) { draft.effort = "" } }
+            Picker(title + (model.allowClaudeAdjustment ? " effort limit" : " fixed effort"), selection: $draft.effort) {
+                if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose" : "Unavailable").tag(draft.effort).disabled(true) }
+                ForEach(efforts, id: \.self) { Text($0).tag($0) }
+            }.labelsHidden().frame(width: 100).focused($focus, equals: .effort).disabled(!model.modelCatalogUsable || efforts.isEmpty)
+        }.padding(.vertical, 4).onChange(of: focus) { _, value in if value != nil { onFocus() } }
+    }
+}
+
+private struct SelectedModelHints: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) : []) + [model.fallbackRouteDraft.upstreamModel])
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(model.availableChatGPTModels.filter { ids.contains($0.id) }) { item in
+                Text(item.label + " · supported effort: " + item.scalarReasoningEfforts.joined(separator: ", "))
+                Text(item.capabilitySummary).foregroundStyle(MBColor.inkDim)
+            }
+            Text("Source: selected account’s model catalog. " + model.modelCatalogStatus).foregroundStyle(MBColor.inkDim)
+        }.font(MBFont.caption).padding(.vertical, 10)
+    }
+}
+
+/// Only the header is a button; independent controls inside the content remain independent.
+private struct WholeRowDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        WholeRowDisclosure(configuration: configuration)
+    }
+}
+
+private struct WholeRowDisclosure: View {
+    let configuration: DisclosureGroupStyleConfiguration
+    @FocusState private var focused: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { configuration.isExpanded.toggle() } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 12, weight: .semibold)).frame(width: 14).accessibilityHidden(true)
+                    configuration.label
+                    Spacer(minLength: 0)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 9).padding(.horizontal, 5)
+                    .contentShape(Rectangle())
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(focused ? MBColor.brand : .clear, lineWidth: 2))
+            }.buttonStyle(.plain).focused($focused)
+                .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+                .onKeyPress(.return) { configuration.isExpanded.toggle(); return .handled }
+                .onKeyPress(.space) { configuration.isExpanded.toggle(); return .handled }
+            if configuration.isExpanded { configuration.content.disclosureGroupStyle(WholeRowDisclosureStyle()) }
+        }
+    }
 }
