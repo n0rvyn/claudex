@@ -4,6 +4,8 @@ import Foundation
 public enum EffortPolicy {
     public static let levels = ["low", "medium", "high", "xhigh", "max"]
     public static let messageBeta = "mid-conversation-output-config-2026-07-01"
+    /// Observed on installed Claude Code 2.1.292; same effort-only control wire shape.
+    public static let claudeCodeMessageBeta = "per-turn-control-2026-07-01"
 
     /// A control message takes effect at the next user message and remains active.
     public static func clientEffort(_ input: AnthropicMessagesRequest, headers: [String: String]) throws -> String? {
@@ -15,7 +17,8 @@ public enum EffortPolicy {
                       Set(control.values.keys) == Set(["effort"]), control.string("effort") != nil else {
                     throw SIWCError.unsupported("per-message effort requires an empty system message containing only output_config.effort")
                 }
-                guard (headers["anthropic-beta"] ?? "").split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }).contains(messageBeta) else {
+                let betas = (headers["anthropic-beta"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                guard betas.contains(messageBeta) || betas.contains(claudeCodeMessageBeta) else {
                     throw SIWCError.unsupported("per-message effort requires anthropic-beta: " + messageBeta)
                 }
                 pending = control
