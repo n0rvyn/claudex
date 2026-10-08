@@ -45,12 +45,15 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
     public let singleModelMode: Bool?
     /// Nil/false fixes effort; true treats each route effort as default and ceiling.
     public let allowClientEffort: Bool?
+    /// Explicit standard Fable mapping, after legacy ordered rules. Nil uses the existing fallback.
+    public let fableRoute: ModelRoute?
 
-    public init(rules: [ModelRoutingRule], fallback: ModelRoute, singleModelMode: Bool? = nil, allowClientEffort: Bool? = nil) {
+    public init(rules: [ModelRoutingRule], fallback: ModelRoute, singleModelMode: Bool? = nil, allowClientEffort: Bool? = nil, fableRoute: ModelRoute? = nil) {
         self.rules = rules
         self.fallback = fallback
         self.singleModelMode = singleModelMode
         self.allowClientEffort = allowClientEffort
+        self.fableRoute = fableRoute
     }
 
     /// Resolves a Claude `model` string to a `ModelRoute`.
@@ -64,7 +67,7 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
                 return rule.route
             }
         }
-        return fallback
+        return Self.isStandardFableName(claudeModel) ? effectiveFableRoute : fallback
     }
 
     /// Resolves a Claude `model` string to a `ResolvedRoute`, including the matched rule label.
@@ -77,8 +80,16 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
                 return ResolvedRoute(route: rule.route, matchLabel: rule.match)
             }
         }
+        if Self.isStandardFableName(claudeModel) { return ResolvedRoute(route: effectiveFableRoute, matchLabel: fableRoute == nil ? "fallback" : "fable") }
         return ResolvedRoute(route: fallback, matchLabel: "fallback")
     }
+    public var effectiveFableRoute: ModelRoute { fableRoute ?? fallback }
+
+    /// Claude Code resolves best/default/opusplan before the wire request; do not guess their family.
+    public static func isStandardFableName(_ name: String) -> Bool {
+        name.lowercased().range(of: #"^(?:fable|claude-fable-[0-9]+(?:-[0-9]+)*)(?:\[1m\])?$"#, options: .regularExpression) != nil
+    }
+
 }
 
 // MARK: - Default table (Phase 2 baseline)

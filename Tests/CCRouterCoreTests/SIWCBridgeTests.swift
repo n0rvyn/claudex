@@ -290,4 +290,22 @@ struct SIWCBridgeTests {
         #expect(await client.calls == 0)
     }
 
+    @Test func fableRouteUsesFixedOrBoundedFollowEffort() async throws {
+        let catalog = SIWCModelCatalogSnapshot(accountID: "account-fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "fixture-model", label: "Fixture", accountID: "account-fixture", details: JSONObject.from(["supported_reasoning_levels": .array(["low", "medium", "high"].map { .object(JSONObject.from(["effort": .string($0)])) })]))])
+        for follow in [false, true] {
+            let client = SIWCFixtureClient([[completed]])
+            let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, catalogProvider: { _ in if !follow { throw SIWCError.remote("fixed must not load catalog") }; return catalog })
+            let ceiling = ModelRoute(upstreamModel: "fixture-model", reasoningEffort: "high", textVerbosity: "medium")
+            await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route, allowClientEffort: follow, fableRoute: ceiling), advisorRoute: Self.route)
+            let old = effortRequest(#"[{"role":"user","content":"fable"}]"#, effort: "low")
+            var body = try JSONDecoder().decode(JSONObject.self, from: old.body)
+            body["model"] = .string("claude-fable-5-1")
+            let input = HTTPRequest(method: old.method, path: old.path, headers: old.headers, body: try JSONEncoder().encode(body))
+            try await consume(bridge.handleMessages(input), SIWCFixtureWriter())
+            #expect(await client.payload(0).string("model") == "fixture-model")
+            #expect(await client.payload(0).object("reasoning")?.string("effort") == (follow ? "low" : "high"))
+            #expect(await client.payload(0).object("text")?.string("verbosity") == "medium")
+        }
+    }
+
 }

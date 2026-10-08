@@ -111,6 +111,7 @@ final class AppModel: ObservableObject {
     @Published var responsesURLDraft: String
     @Published var subscriptionAuthFilePathDraft: String
     @Published var routingRulesDraft: [RoutingRuleDraft] = []
+    @Published var fableRouteDraft: RouteDraft
     @Published var fallbackRouteDraft: RouteDraft
     @Published var advisorRouteDraft: RouteDraft
     @Published var useAdvancedRouting = false
@@ -163,6 +164,7 @@ final class AppModel: ObservableObject {
             effort: configuration.routingTable.fallback.reasoningEffort,
             verbosity: configuration.routingTable.fallback.textVerbosity
         )
+        self.fableRouteDraft = RouteDraft(upstreamModel: configuration.routingTable.effectiveFableRoute.upstreamModel, effort: configuration.routingTable.effectiveFableRoute.reasoningEffort, verbosity: configuration.routingTable.effectiveFableRoute.textVerbosity)
         self.advisorRouteDraft = RouteDraft(
             upstreamModel: configuration.advisorRoute.upstreamModel,
             effort: configuration.advisorRoute.reasoningEffort,
@@ -669,6 +671,7 @@ final class AppModel: ObservableObject {
         guard mappingAutosaveSubscriptions.isEmpty else { return }
         Publishers.MergeMany([
             $routingRulesDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            $fableRouteDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $fallbackRouteDraft.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $useAdvancedRouting.dropFirst().map { _ in () }.eraseToAnyPublisher(),
             $allowClaudeAdjustment.dropFirst().map { _ in () }.eraseToAnyPublisher()
@@ -733,9 +736,10 @@ final class AppModel: ObservableObject {
                 textVerbosity: fallbackRouteDraft.verbosity
             ),
             singleModelMode: !useAdvancedRouting,
-            allowClientEffort: allowClaudeAdjustment
+            allowClientEffort: allowClaudeAdjustment,
+            fableRoute: ModelRoute(upstreamModel: fableRouteDraft.upstreamModel, reasoningEffort: fableRouteDraft.effort, textVerbosity: fableRouteDraft.verbosity)
         )
-        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) : []) + [table.fallback]) {
+        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) + [table.effectiveFableRoute] : []) + [table.fallback]) {
             routingSaveError = error; statusText = error; return
         }
         let advisor = onlyRouting ? currentConfiguration.advisorRoute : ModelRoute(
@@ -871,7 +875,8 @@ final class AppModel: ObservableObject {
                     textVerbosity: existingTable.fallback.textVerbosity
                 ),
                 singleModelMode: existingTable.singleModelMode,
-                allowClientEffort: existingTable.allowClientEffort
+                allowClientEffort: existingTable.allowClientEffort,
+                fableRoute: existingTable.fableRoute
             )
             let existingAdvisor = currentConfiguration.advisorRoute
             let updatedAdvisor = ModelRoute(
@@ -1022,6 +1027,7 @@ final class AppModel: ObservableObject {
             effort: configuration.routingTable.fallback.reasoningEffort,
             verbosity: configuration.routingTable.fallback.textVerbosity
         )
+        fableRouteDraft = RouteDraft(upstreamModel: configuration.routingTable.effectiveFableRoute.upstreamModel, effort: configuration.routingTable.effectiveFableRoute.reasoningEffort, verbosity: configuration.routingTable.effectiveFableRoute.textVerbosity)
         advisorRouteDraft = RouteDraft(
             upstreamModel: configuration.advisorRoute.upstreamModel,
             effort: configuration.advisorRoute.reasoningEffort,
@@ -1033,6 +1039,10 @@ final class AppModel: ObservableObject {
         for keyword in ["opus", "sonnet", "haiku"] where !routingRulesDraft.contains(where: { $0.keyword.lowercased() == keyword }) {
             routingRulesDraft.append(RoutingRuleDraft(keyword: keyword, upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity))
         }
+    }
+
+    var hasFableOverrides: Bool {
+        routingRulesDraft.contains { rule in ["fable", "claude-fable-5", "claude-fable-5-1"].contains { $0.contains(rule.keyword.lowercased()) } }
     }
 
     var hasCustomRoutingRules: Bool {

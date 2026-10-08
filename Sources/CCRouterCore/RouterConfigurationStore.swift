@@ -151,7 +151,8 @@ public struct RouterConfigurationStore {
                 rules: baseRules,
                 fallback: ModelRoute(upstreamModel: envExec, reasoningEffort: "xhigh", textVerbosity: "low"),
                 singleModelMode: stored.routingTable?.singleModelMode,
-                allowClientEffort: stored.routingTable?.allowClientEffort
+                allowClientEffort: stored.routingTable?.allowClientEffort,
+                fableRoute: stored.routingTable?.fableRoute
             )
         } else if let table = stored.routingTable {
             routingTable = table

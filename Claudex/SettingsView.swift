@@ -516,7 +516,7 @@ private struct UpstreamSettingsTab: View {
                 return "Saved effort \(route.reasoningEffort.isEmpty ? "(none)" : route.reasoningEffort) is unavailable. Choose a supported reasoning effort."
             }
         }
-        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } : []) + [route])
+        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } + [ModelRoute(upstreamModel: model.fableRouteDraft.upstreamModel, reasoningEffort: model.fableRouteDraft.effort, textVerbosity: model.fableRouteDraft.verbosity)] : []) + [route])
     }
     var body: some View {
         ScrollViewReader { proxy in
@@ -570,6 +570,8 @@ private struct UpstreamSettingsTab: View {
                     if !model.useAdvancedRouting {
                         MappingRouteRow(title: "All roles", draft: $model.fallbackRouteDraft, onFocus: { proxy.scrollTo("fallback", anchor: .center) }).environmentObject(model).id("fallback")
                     } else {
+                        MappingRouteRow(title: "Fable", draft: $model.fableRouteDraft, onFocus: { proxy.scrollTo("fable", anchor: .center) }).environmentObject(model).id("fable")
+                        if model.hasFableOverrides { Text("Existing ordered custom rules take precedence over the Fable default.").font(MBFont.caption).foregroundStyle(MBColor.inkDim) }
                         ForEach(["opus", "sonnet", "haiku"], id: \.self) { keyword in
                             ClaudeModelRouteRow(model: model, keyword: keyword, onFocus: { proxy.scrollTo(keyword, anchor: .center) }).id(keyword)
                         }
@@ -1090,7 +1092,7 @@ private struct MappingRouteRow: View {
 private struct SelectedModelHints: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) : []) + [model.fallbackRouteDraft.upstreamModel])
+        let ids = Set((model.useAdvancedRouting ? model.routingRulesDraft.map(\.upstreamModel) + [model.fableRouteDraft.upstreamModel] : []) + [model.fallbackRouteDraft.upstreamModel])
         VStack(alignment: .leading, spacing: 7) {
             ForEach(model.availableChatGPTModels.filter { ids.contains($0.id) }) { item in
                 Text(item.label + " · supported effort: " + item.scalarReasoningEfforts.joined(separator: ", "))

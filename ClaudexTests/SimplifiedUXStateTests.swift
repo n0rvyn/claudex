@@ -38,6 +38,20 @@ import Testing
         await model.saveRoutingAndApply()
         #expect(model.routingSaveError != nil)
     }
+    @Test func fableDraftStartsFromFallbackAndSavesIndependently() async {
+        let model = AppModel.visualFixture("ready")
+        #expect(model.fableRouteDraft == model.fallbackRouteDraft)
+        let rules = model.currentConfiguration.routingTable.rules
+        model.fableRouteDraft.upstreamModel = "gpt-6-sol"
+        model.fableRouteDraft.effort = "medium"
+        await model.saveRoutingAndApply()
+        #expect(model.routingSaveError == nil && !model.daemonIsRunning)
+        #expect(model.currentConfiguration.routingTable.resolve(for: "claude-fable-5-1").upstreamModel == "gpt-6-sol")
+        #expect(model.currentConfiguration.routingTable.rules == rules)
+        #expect(model.currentConfiguration.routingTable.fallback.reasoningEffort == "low")
+        model.reloadPersistedConfiguration()
+        #expect(model.fableRouteDraft.effort == "medium")
+    }
     @Test func modelMappingsAndEffortAuthorityPersistWithoutStarting() async {
         let model = AppModel.visualFixture("ready")
         model.useAdvancedRouting = true
