@@ -54,8 +54,6 @@ struct RouteDraft: Equatable {
 }
 
 enum RoutingOptions {
-    static let upstreamModels = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.3-codex", "gpt-5.2"]
-    static let efforts = ["low", "medium", "high", "xhigh"]
     static let verbosities = ["low", "medium", "high"]
 }
 
@@ -112,6 +110,9 @@ final class AppModel: ObservableObject {
     private var refreshCancellable: AnyCancellable?
     private var subscriptionAuthBookmarkDataDraft: Data?
     private let subscriptionRefresherFactory: @Sendable (URL, Data?) -> any SubscriptionSessionProviding
+    private let modelCatalog: SIWCModelCatalog
+    private var modelCatalogLease = UUID()
+    private var catalogAccountID: String?
     private let routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)?
 
     init(
@@ -119,9 +120,12 @@ final class AppModel: ObservableObject {
         subscriptionRefresherFactory: @escaping @Sendable (URL, Data?) -> any SubscriptionSessionProviding = { url, bookmark in
             SIWCAuth.shared
         },
-        routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)? = nil
+        routingUpdateApplier: (@Sendable (ModelRoutingTable, ModelRoute) async -> Void)? = nil,
+        modelCatalog: SIWCModelCatalog = SIWCModelCatalog(),
+        automaticallyLoadCatalog: Bool = true
     ) {
         self.configurationStore = configurationStore
+        self.modelCatalog = modelCatalog
         self.subscriptionRefresherFactory = subscriptionRefresherFactory
         self.routingUpdateApplier = routingUpdateApplier
         let configuration = configurationStore.loadOrCreate()
@@ -145,6 +149,7 @@ final class AppModel: ObservableObject {
         applyConfigurationStatus(configuration)
         syncDrafts(configuration)
         refreshLaunchAtLogin()
+        if automaticallyLoadCatalog { Task { await loadChatGPTAccounts() } }
         refresh()
         refreshCancellable = Timer
             .publish(every: 2.5, on: .main, in: .common)
@@ -168,7 +173,7 @@ final class AppModel: ObservableObject {
     }
 
     var canStartDaemon: Bool {
-        daemonIsRunning || isUpstreamReady
+        daemonIsRunning || (isUpstreamReady && savedRoutingCatalogError == nil)
     }
 
     var primaryActionLabel: String {
@@ -381,7 +386,8 @@ final class AppModel: ObservableObject {
 
     func startDaemon() {
         guard canStartDaemon else {
-            resolveAuthBlockingState(for: "starting the gateway")
+            if isUpstreamReady { statusText = savedRoutingCatalogError ?? "Refresh models before starting" }
+            else { resolveAuthBlockingState(for: "starting the gateway") }
             return
         }
         Task {
@@ -467,6 +473,7 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @Published var modelCatalogSnapshot: SIWCModelCatalogSnapshot?
     @Published var availableChatGPTModels: [SIWCModelSummary] = []
     @Published var modelCatalogError: String?
     @Published var isLoadingModelCatalog = false
@@ -481,7 +488,8 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.isSigningIn = false
             if case .failure(let error) = result { self.signInError = error.localizedDescription }
-            Task { await self.loadChatGPTAccounts(); self.refresh() }
+            let succeeded = (try? result.get()) != nil
+            Task { await self.loadChatGPTAccounts(forceCatalogRefresh: succeeded); self.refresh() }
         }
         Task {
             do {
@@ -495,33 +503,63 @@ final class AppModel: ObservableObject {
     func cancelChatGPTSignIn() {
         Task { await chatGPTSignIn.cancel(); isSigningIn = false }
     }
-    func loadChatGPTModelCatalog() async {
-        guard !isLoadingModelCatalog else { return }
-        isLoadingModelCatalog = true
-        defer { isLoadingModelCatalog = false }
-        let expectedAccount = chatGPTAccounts.first(where: { $0.active })?.id
-        do {
-            let models = try await SIWCAuth.shared.availableModels()
-            await loadChatGPTAccounts()
-            guard chatGPTAccounts.first(where: { $0.active })?.id == expectedAccount,
-                  models.allSatisfy({ $0.accountID == expectedAccount }) else { return }
-            availableChatGPTModels = models; modelCatalogError = nil
-        }
-        catch { modelCatalogError = error.localizedDescription }
+    var modelCatalogUsable: Bool {
+        guard let snapshot = modelCatalogSnapshot,
+              snapshot.accountID == chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id,
+              snapshot.isFresh(), modelCatalogError == nil else { return false }
+        return true
     }
-    func loadChatGPTAccounts() async {
+    var modelCatalogStatus: String {
+        if isLoadingModelCatalog { return "Updating account models…" }
+        if let error = modelCatalogError { return "Models unavailable: " + error }
+        guard let snapshot = modelCatalogSnapshot else { return "Sign in or refresh the account model list." }
+        let stamp = snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened)
+        return modelCatalogUsable ? "Account models · updated " + stamp + " · cache valid for 1 hour"
+            : "Model list expired · last updated " + stamp + " · refresh required"
+    }
+    func routingCatalogError(_ routes: [ModelRoute]) -> String? {
+        guard modelCatalogUsable, let snapshot = modelCatalogSnapshot else { return "Refresh the selected account's model list before saving or starting the gateway." }
+        return routes.compactMap { snapshot.validationError(for: $0) }.first
+    }
+    var savedRoutingCatalogError: String? {
+        routingCatalogError(currentConfiguration.routingTable.rules.map(\.route) + [currentConfiguration.routingTable.fallback])
+    }
+    func loadChatGPTModelCatalog(force: Bool = true) async {
+        guard let expectedAccount = chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id,
+              !isLoadingModelCatalog else { return }
+        let lease = UUID(); modelCatalogLease = lease
+        isLoadingModelCatalog = true
+        defer { if modelCatalogLease == lease { isLoadingModelCatalog = false } }
         do {
-            let previous = chatGPTAccounts.first(where: { $0.active })?.id
-            chatGPTAccounts = try await SIWCAuth.shared.accounts()
-            if previous != chatGPTAccounts.first(where: { $0.active })?.id {
-                availableChatGPTModels = []; modelCatalogError = nil
-            }
+            let snapshot = try await modelCatalog.load(accountID: expectedAccount, force: force)
+            guard modelCatalogLease == lease,
+                  chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id == expectedAccount else { return }
+            modelCatalogSnapshot = snapshot; availableChatGPTModels = snapshot.models; modelCatalogError = nil
+        } catch {
+            guard modelCatalogLease == lease else { return }
+            availableChatGPTModels = []; modelCatalogSnapshot = nil; modelCatalogError = error.localizedDescription
         }
-        catch { signInError = error.localizedDescription }
+    }
+    func loadChatGPTAccounts(forceCatalogRefresh: Bool = false) async {
+        do {
+            let accounts = try await SIWCAuth.shared.accounts()
+            chatGPTAccounts = accounts
+            let active = accounts.first(where: { $0.active && $0.authorized })?.id
+            if catalogAccountID != active {
+                catalogAccountID = active; modelCatalogLease = UUID(); isLoadingModelCatalog = false
+                availableChatGPTModels = []; modelCatalogSnapshot = nil; modelCatalogError = nil
+                if daemonIsRunning { await daemon.stop(); await refreshSnapshot(runningText: "Gateway paused after account change") }
+                if active != nil { await loadChatGPTModelCatalog(force: forceCatalogRefresh) }
+            } else if forceCatalogRefresh { await loadChatGPTModelCatalog(force: true) }
+        } catch {
+            chatGPTAccounts = []; availableChatGPTModels = []; modelCatalogSnapshot = nil
+            modelCatalogLease = UUID(); isLoadingModelCatalog = false; catalogAccountID = nil
+            signInError = error.localizedDescription; modelCatalogError = error.localizedDescription
+        }
     }
     func selectChatGPTAccount(_ id: String) {
         Task {
-            do { try await SIWCAuth.shared.select(id); await loadChatGPTAccounts(); refresh() }
+            do { try await SIWCAuth.shared.select(id); await loadChatGPTAccounts(forceCatalogRefresh: true); refresh() }
             catch { signInError = error.localizedDescription }
         }
     }
@@ -578,7 +616,7 @@ final class AppModel: ObservableObject {
 
     func addRoutingRule() {
         routingRulesDraft.append(
-            RoutingRuleDraft(keyword: "", upstreamModel: "gpt-5.4", effort: "xhigh", verbosity: "low")
+            RoutingRuleDraft(keyword: "", upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity)
         )
     }
 
@@ -631,6 +669,9 @@ final class AppModel: ObservableObject {
                 textVerbosity: fallbackRouteDraft.verbosity
             )
         )
+        if let error = routingCatalogError(table.rules.map(\.route) + [table.fallback]) {
+            routingSaveError = error; statusText = error; return
+        }
         let advisor = ModelRoute(
             upstreamModel: advisorRouteDraft.upstreamModel,
             reasoningEffort: advisorRouteDraft.effort,

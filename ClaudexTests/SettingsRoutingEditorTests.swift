@@ -28,7 +28,7 @@ struct SettingsRoutingEditorTests {
         let model = AppModelTestHelper.makeSUT()
         model.addRoutingRule()
         let lastRule = model.routingRulesDraft.last!
-        #expect(lastRule.upstreamModel == "gpt-5.4")
+        #expect(lastRule.upstreamModel == model.fallbackRouteDraft.upstreamModel)
     }
 
     // MARK: Edit rule
@@ -122,6 +122,26 @@ struct SettingsRoutingEditorTests {
         #expect(model.advisorRouteDraft.effort == "low")
     }
 
+    @Test func unavailableSavedModelCannotBeSavedOrReplacedAutomatically() async {
+        let store = InMemoryConfigurationStore(initial: .defaultTestConfig())
+        let model = AppModel(configurationStore: store, automaticallyLoadCatalog: false)
+        AppModelTestHelper.installCatalog(on: model)
+        model.fallbackRouteDraft.upstreamModel = "retired-fixture"
+        await model.saveRoutingAndApply()
+        #expect(store.saveCallCount == 0)
+        #expect(model.fallbackRouteDraft.upstreamModel == "retired-fixture")
+        #expect(model.routingSaveError?.contains("unavailable") == true)
+    }
+    @Test func expiredOrWrongAccountCatalogCannotValidateRouting() {
+        let model = AppModelTestHelper.makeSUT()
+        let models = model.availableChatGPTModels
+        model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: "fixture-account", fetchedAt: Date().addingTimeInterval(-3601), models: models)
+        #expect(!model.modelCatalogUsable)
+        #expect(model.savedRoutingCatalogError != nil)
+        model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: "other-account", fetchedAt: Date(), models: models)
+        #expect(!model.modelCatalogUsable)
+    }
+
     // MARK: saveRoutingAndApply integration
 
     @Test
@@ -133,9 +153,11 @@ struct SettingsRoutingEditorTests {
             configurationStore: store,
             routingUpdateApplier: { [recorder] table, advisor in
                 await recorder.record(table: table, advisor: advisor)
-            }
+            },
+            automaticallyLoadCatalog: false
         )
 
+        AppModelTestHelper.installCatalog(on: model)
         model.addRoutingRule()
         model.routingRulesDraft[0].keyword = "opus"
         model.routingRulesDraft[0].upstreamModel = "gpt-5.4"
@@ -164,7 +186,8 @@ struct SettingsRoutingEditorTests {
             configurationStore: store,
             routingUpdateApplier: { [recorder] table, advisor in
                 await recorder.record(table: table, advisor: advisor)
-            }
+            },
+            automaticallyLoadCatalog: false
         )
 
         model.addRoutingRule()
@@ -183,8 +206,21 @@ struct SettingsRoutingEditorTests {
 
 @MainActor
 enum AppModelTestHelper {
+    static func installCatalog(on model: AppModel) {
+        let id = "fixture-account"
+        model.chatGPTAccounts = [SIWCAccountSummary(id: id, label: "Fixture", clientID: "fixture-client", active: true, authorized: true)]
+        let models = ["gpt-5.4", "gpt-5.4-mini"].map { slug in
+            SIWCModelSummary(id: slug, label: slug, accountID: id, details: JSONObject([
+                "supported_reasoning_levels": .array(["low", "medium", "high", "xhigh"].map { .object(JSONObject(["effort": .string($0)])) })
+            ]))
+        }
+        model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: id, fetchedAt: Date(), models: models)
+        model.availableChatGPTModels = models
+    }
     static func makeSUT() -> AppModel {
-        AppModel()
+        let model = AppModel(configurationStore: InMemoryConfigurationStore(initial: .defaultTestConfig()), automaticallyLoadCatalog: false)
+        installCatalog(on: model)
+        return model
     }
 }
 

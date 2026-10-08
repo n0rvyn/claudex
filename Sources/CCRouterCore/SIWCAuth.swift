@@ -278,7 +278,7 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         try store.write(state)
         return revoked
     }
-    /// Explicit user action only; does not select a model or infer cost/effort from its name.
+    /// Used after account changes or explicit refresh; never selects a model or runs inference.
     public func availableModels() async throws -> [SIWCModelSummary] {
         let credentials = try await loadCurrent()
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
@@ -386,7 +386,7 @@ extension Data {
     }
 }
 
-public struct SIWCModelSummary: Sendable, Identifiable {
+public struct SIWCModelSummary: Codable, Sendable, Identifiable {
     public let id: String
     public let label: String
     public let accountID: String

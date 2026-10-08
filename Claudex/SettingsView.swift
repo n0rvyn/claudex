@@ -506,8 +506,9 @@ private struct UpstreamSettingsTab: View {
             }
 
             MBSection(title: "Routing policy") {
-                Button("Load models available to this account") { Task { await model.loadChatGPTModelCatalog() } }
+                Button("Refresh account models") { Task { await model.loadChatGPTModelCatalog() } }
                     .disabled(model.isLoadingModelCatalog || !model.chatGPTAccounts.contains(where: { $0.active && $0.authorized }))
+                Text(model.modelCatalogStatus).font(.caption).foregroundStyle(MBColor.inkDim)
                 ForEach(model.availableChatGPTModels) { available in
                     VStack(alignment: .leading) {
                         Text("\(available.label) · \(available.id)").font(MBFont.mono).textSelection(.enabled)
@@ -517,8 +518,9 @@ private struct UpstreamSettingsTab: View {
                     }
                 }
                 if let error = model.modelCatalogError { Text(error).foregroundStyle(MBColor.faultInk) }
-                Text("Existing routes are preserved. Availability does not establish subscription cost or supported reasoning effort.").font(.caption).foregroundStyle(MBColor.inkDim)
-                RoutingPolicyEditor(model: model)
+                Text("Availability is account-specific. Efforts and capabilities come from returned metadata; subscription cost is not established by this list.").font(.caption).foregroundStyle(MBColor.inkDim)
+                RoutingPolicyEditor(model: model).environmentObject(model)
+                if let error = model.savedRoutingCatalogError { Text(error).font(.caption).foregroundStyle(MBColor.faultInk) }
             }
 
             MBSection(title: "ChatGPT account") {
@@ -812,40 +814,40 @@ private struct RoutePolicyBlock: View {
 
 private struct RouteDraftPickers: View {
     @Binding var draft: RouteDraft
-
+    @EnvironmentObject private var model: AppModel
+    private var selected: SIWCModelSummary? { model.availableChatGPTModels.first { $0.id == draft.upstreamModel } }
+    private var efforts: [String] { selected?.reasoningEfforts ?? [] }
     var body: some View {
-        HStack(spacing: 8) {
-            RoutePickerColumn(title: "Model") {
-                Picker("Model", selection: $draft.upstreamModel) {
-                    ForEach(RoutingOptions.upstreamModels, id: \.self) { value in
-                        Text(value).tag(value)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                RoutePickerColumn(title: "Model") {
+                    Picker("Model", selection: $draft.upstreamModel) {
+                        if selected == nil { Text("Unavailable: " + draft.upstreamModel).tag(draft.upstreamModel).disabled(true) }
+                        ForEach(model.availableChatGPTModels) { item in Text(item.label + " · " + item.id).tag(item.id) }
                     }
-                }
-                .labelsHidden()
-            }
-            .frame(maxWidth: 250)
-
-            RoutePickerColumn(title: "Reasoning") {
-                Picker("Reasoning", selection: $draft.effort) {
-                    ForEach(RoutingOptions.efforts, id: \.self) { value in
-                        Text(value).tag(value)
+                    .labelsHidden()
+                    .disabled(!model.modelCatalogUsable)
+                    .onChange(of: draft.upstreamModel) { _, _ in
+                        if !efforts.contains(draft.effort) { draft.effort = "" }
                     }
-                }
-                .labelsHidden()
+                }.frame(maxWidth: 350)
+                RoutePickerColumn(title: "Reasoning") {
+                    Picker("Reasoning", selection: $draft.effort) {
+                        if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose effort" : "Unsupported: " + draft.effort).tag(draft.effort).disabled(true) }
+                        ForEach(efforts, id: \.self) { value in Text(value).tag(value) }
+                    }.labelsHidden().disabled(!model.modelCatalogUsable || efforts.isEmpty)
+                }.frame(maxWidth: 130)
+                RoutePickerColumn(title: "Verbosity") {
+                    Picker("Verbosity", selection: $draft.verbosity) {
+                        ForEach(RoutingOptions.verbosities, id: \.self) { value in Text(value).tag(value) }
+                    }.labelsHidden()
+                }.frame(maxWidth: 130)
             }
-            .frame(maxWidth: 130)
-
-            RoutePickerColumn(title: "Verbosity") {
-                Picker("Verbosity", selection: $draft.verbosity) {
-                    ForEach(RoutingOptions.verbosities, id: \.self) { value in
-                        Text(value).tag(value)
-                    }
-                }
-                .labelsHidden()
-            }
-            .frame(maxWidth: 130)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+            if let selected {
+                Text(selected.capabilitySummary).font(.caption).foregroundStyle(MBColor.inkDim)
+                if efforts.isEmpty { Text("Reasoning metadata unavailable; refresh before saving.").font(.caption).foregroundStyle(MBColor.faultInk) }
+            } else { Text("Choose an available account model; the saved value has not been replaced automatically.").font(.caption).foregroundStyle(MBColor.faultInk) }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
