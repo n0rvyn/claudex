@@ -79,6 +79,7 @@ public final class SIWCSignIn {
                   let origin = URLComponents(string: pending.redirectURI), let host = origin.host, let port = origin.port,
                   let callback = URL(string: "http://\(host):\(port)" + parts[1]) else { throw SIWCError.invalidCallback }
             try await auth.complete(callback: callback)
+            guard attempt?.state == pending.state else { return }
             let body = "Claudex sign-in complete. You can close this window."
             let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -88,6 +89,7 @@ public final class SIWCSignIn {
             }
             await finish(.success(()))
         } catch {
+            guard attempt?.state == pending.state else { return }
             // An unrelated or forged local request cannot cancel the pending login.
             if case SIWCError.invalidCallback = error { return }
             await finish(.failure(error))

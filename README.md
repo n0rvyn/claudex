@@ -16,7 +16,7 @@ Each request sends full history and current instructions with `store:false`, `st
 
 Streaming emits independent parallel tool argument blocks, checks item/call identity and final arguments, and requires `response.completed`. Replay persistence precedes `message_stop`. Failed, incomplete, malformed or truncated streams never report successful completion. Inference is not automatically retried; reconnecting or repeating a request is a new user/client action.
 
-Unsupported tool types and named forced tool choices return explicit errors. Nested advisor execution is retired. Existing routing rules are preserved, but their old model names/efforts are not certified for the newly authorized account.
+Unsupported tool types, native Anthropic web-search result conversion and named forced tool choices return explicit errors. Account-reported model details are preserved for capability review; no cost or effort is guessed. Nested advisor execution is retired. Existing routing rules are preserved, but their old model names/efforts are not certified for the newly authorized account.
 
 ## Validation
 

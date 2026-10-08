@@ -118,7 +118,8 @@ public actor SIWCAuth: SubscriptionSessionProviding {
     private let store: SIWCStore
     private let http: any SIWCHTTP
     private var attempt: SIWCAttempt?
-    private var refreshTask: Task<SubscriptionCredentials, Error>?
+    private var signInGeneration = 0
+    private var refreshTask: (accountID: String, leaseID: UUID, task: Task<SubscriptionCredentials, Error>)?
     public init(store: SIWCStore = SIWCStore(), http: any SIWCHTTP = SIWCURLHTTP()) {
         self.store = store; self.http = http
     }
@@ -131,11 +132,14 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         return Data(bytes).base64URL
     }
     public func begin(redirectURI: String, accountID: String? = nil) async throws -> SIWCAttempt {
+        signInGeneration += 1
+        let generation = signInGeneration
         guard let callback = URLComponents(string: redirectURI), callback.scheme == "http",
               callback.host == "127.0.0.1", callback.port != nil,
               callback.path == "/auth/callback", callback.query == nil, callback.fragment == nil,
               callback.user == nil, callback.password == nil else { throw SIWCError.invalidCallback }
         let fd = try await store.acquire(); defer { store.release(fd) }
+        guard generation == signInGeneration else { throw CancellationError() }
         let state = try store.read()
         let selected = accountID.flatMap { id in state.accounts.first { $0.id == id } }
         if accountID != nil && selected == nil { throw SIWCError.invalidIdentity }
@@ -155,8 +159,9 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         attempt = pending
         return pending
     }
-    public func cancelSignIn() { attempt = nil }
+    public func cancelSignIn() { signInGeneration += 1; attempt = nil }
     public func complete(callback: URL) async throws {
+        let generation = signInGeneration
         guard let pending = attempt else { throw SIWCError.invalidCallback }
         guard Date() < pending.deadline else { attempt = nil; throw SIWCError.expiredAttempt }
         guard let components = URLComponents(url: callback, resolvingAgainstBaseURL: false),
@@ -177,6 +182,7 @@ public actor SIWCAuth: SubscriptionSessionProviding {
               query["client_id"] == nil || query["client_id"] == client else { throw SIWCError.invalidCallback }
         let tokens = try await exchange(["grant_type": "authorization_code", "client_id": client,
             "code": code, "code_verifier": pending.verifier, "redirect_uri": pending.redirectURI, "resource": Self.resource])
+        guard generation == signInGeneration else { throw CancellationError() }
         let identity = try await validateIDToken(tokens.idToken, clientID: client, nonce: pending.nonce)
         guard pending.expectedSubject == nil || pending.expectedSubject == identity.subject else { throw SIWCError.invalidIdentity }
         try validateScopes(tokens.scopes)
@@ -184,6 +190,7 @@ public actor SIWCAuth: SubscriptionSessionProviding {
             accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, idToken: tokens.idToken,
             scopes: tokens.scopes, expiresAt: Date().addingTimeInterval(tokens.expiresIn))
         let fd = try await store.acquire(); defer { store.release(fd) }
+        guard generation == signInGeneration else { throw CancellationError() }
         var state = try store.read()
         state.accounts.removeAll { $0.id == account.id }; state.accounts.append(account); state.activeID = account.id
         try store.write(state)
@@ -211,18 +218,27 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         return SubscriptionCredentials(accessToken: account.accessToken, accountID: account.id)
     }
     public func refreshAndReload() async throws -> SubscriptionCredentials {
-        if let refreshTask { return try await refreshTask.value }
-        let task = Task { try await self.refreshLocked() }
-        refreshTask = task
-        defer { refreshTask = nil }
+        let fd = try await store.acquire()
+        let state: SIWCState
+        do { state = try store.read() } catch { store.release(fd); throw error }
+        store.release(fd)
+        guard let accountID = state.activeID else { throw SIWCError.signInRequired }
+        if let refreshTask, refreshTask.accountID == accountID { return try await refreshTask.task.value }
+        let leaseID = UUID()
+        let task = Task { try await self.refreshLocked(expectedAccountID: accountID) }
+        refreshTask = (accountID, leaseID, task)
+        defer { if refreshTask?.leaseID == leaseID { refreshTask = nil } }
         return try await task.value
     }
-    private func refreshLocked() async throws -> SubscriptionCredentials {
+    private func refreshLocked(expectedAccountID: String) async throws -> SubscriptionCredentials {
         let fd = try await store.acquire(); defer { store.release(fd) }
         var state = try store.read()
-        guard let index = state.accounts.firstIndex(where: { $0.id == state.activeID }),
+        guard state.activeID == expectedAccountID else { throw SIWCError.remote("account_changed") }
+        guard let index = state.accounts.firstIndex(where: { $0.id == expectedAccountID }),
               let refresh = state.accounts[index].refreshToken else { throw SIWCError.signInRequired }
         var account = state.accounts[index]
+        guard !account.accessToken.isEmpty else { throw SIWCError.signInRequired }
+        try validateScopes(account.scopes)
         // A second process that waited on the lock uses the first process's fresh token.
         if account.expiresAt.timeIntervalSinceNow > 60 {
             return SubscriptionCredentials(accessToken: account.accessToken, accountID: account.id)
@@ -273,7 +289,9 @@ public actor SIWCAuth: SubscriptionSessionProviding {
               let models = catalog["models"] as? [[String: Any]] else { throw SIWCError.remote("invalid_model_catalog") }
         return models.compactMap { model in
             guard model["visibility"] as? String == "list", let slug = model["slug"] as? String else { return nil }
-            return SIWCModelSummary(id: slug, label: model["display_name"] as? String ?? slug, accountID: credentials.accountID)
+            guard let encoded = try? JSONSerialization.data(withJSONObject: model),
+                  let details = try? JSONDecoder().decode(JSONObject.self, from: encoded) else { return nil }
+            return SIWCModelSummary(id: slug, label: model["display_name"] as? String ?? slug, accountID: credentials.accountID, details: details)
         }
     }
     private func validateScopes(_ scopes: [String]) throws {
@@ -314,6 +332,7 @@ public actor SIWCAuth: SubscriptionSessionProviding {
         guard pieces.count == 3, let headerData = Data(base64URL: pieces[0]), let payloadData = Data(base64URL: pieces[1]),
               let signature = Data(base64URL: pieces[2]),
               let header = try JSONSerialization.jsonObject(with: headerData) as? [String: Any],
+              header["crit"] == nil,
               header["alg"] as? String == "RS256", let kid = header["kid"] as? String,
               let payload = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any] else { throw SIWCError.invalidIdentity }
         let discovery = try await getJSON(URL(string: "https://auth.openai.com/.well-known/openid-configuration")!)
@@ -371,4 +390,10 @@ public struct SIWCModelSummary: Sendable, Identifiable {
     public let id: String
     public let label: String
     public let accountID: String
+    public let details: JSONObject
+    public var detailsText: String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(details) else { return "Model details unavailable" }
+        return String(decoding: data, as: UTF8.self)
+    }
 }

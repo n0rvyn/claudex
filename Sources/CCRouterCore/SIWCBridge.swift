@@ -9,7 +9,7 @@ public actor SIWCBridge {
     private let client: any ResponsesStreamingClient
     private let counter: any AnthropicInputTokenCounting
     private let replayStore: SIWCReplayStore
-    private var inflight: Set<String> = []
+    private var inflight: [String: UUID] = [:]
     public init(configuration: RouterConfiguration, auth: any SubscriptionSessionProviding = SIWCAuth.shared,
                 client: any ResponsesStreamingClient = ResponsesClient(endpoint: URL(string: "https://api.openai.com/v1/responses")!),
                 counter: any AnthropicInputTokenCounting = AnthropicInputTokenCounter(), replayStore: SIWCReplayStore = SIWCReplayStore()) {
@@ -63,35 +63,42 @@ public actor SIWCBridge {
             }
             payload["input"] = .array(items)
             let estimated = try await counter.countInputTokens(for: payload)
-            guard inflight.insert(key).inserted else { return Self.error(SIWCError.remote("request_already_in_progress"), status: 409) }
+            try Task.checkCancellation()
+            guard inflight[key] == nil else { return Self.error(SIWCError.remote("request_already_in_progress"), status: 409) }
+            let leaseID = UUID(); inflight[key] = leaseID
             let stream: AsyncThrowingStream<JSONObject, Error>
-            do { stream = try await client.streamEvents(request: payload, credentials: credentials) }
-            catch { inflight.remove(key); throw error }
+            do { stream = try await client.streamEvents(request: payload, credentials: credentials, requestID: leaseID) }
+            catch { inflight.removeValue(forKey: key); throw error }
             if input.stream == false {
                 let writer = SIWCCollectingWriter()
                 do {
-                    let blocks = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, beforeFinish: { [self, route] blocks in
+                    let blocks = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, allowedTools: Set((input.tools ?? []).compactMap { $0.string("name") }), beforeFinish: { [self, route] blocks in
                         try await saveReplay(blocks.raw, route: route, assistant: blocks.assistant, history: input.messages, scope: scope, sessionPresent: true)
                     })
-                    inflight.remove(key)
+                    inflight.removeValue(forKey: key)
                     return try HTTPResponse.json(value: JSONObject.from([
                         "id": .string("msg_" + UUID().uuidString), "type": .string("message"), "role": .string("assistant"),
                         "model": .string(input.model), "content": .array(blocks.assistant.map(JSONValue.object)),
                         "stop_reason": .string(blocks.hasTools ? "tool_use" : "end_turn"), "stop_sequence": .null,
                         "usage": .object(JSONObject.from(["input_tokens": .number(Double(blocks.inputTokens)), "output_tokens": .number(Double(blocks.outputTokens))]))
                     ]))
-                } catch { inflight.remove(key); throw error }
+                } catch { await client.cancelRequest(leaseID); inflight.removeValue(forKey: key); throw error }
             }
             return HTTPResponse(statusCode: 200, reasonPhrase: "OK",
                 headers: ["Content-Type": "text/event-stream", "Cache-Control": "no-cache"],
+                release: { [self] in
+                    await client.cancelRequest(leaseID)
+                    await clearInflight(key, leaseID: leaseID)
+                },
                 stream: { [self, route] writer in
                     do {
-                        let blocks = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, beforeFinish: { [self, route] blocks in
+                        let blocks = try await run(stream: stream, writer: writer, inputTokens: estimated, model: input.model, allowedTools: Set((input.tools ?? []).compactMap { $0.string("name") }), beforeFinish: { [self, route] blocks in
                             try await saveReplay(blocks.raw, route: route, assistant: blocks.assistant, history: input.messages, scope: scope, sessionPresent: true)
                         })
-                        await clearInflight(key)
+                        await clearInflight(key, leaseID: leaseID)
                     } catch {
-                        await clearInflight(key)
+                        await client.cancelRequest(leaseID)
+                        await clearInflight(key, leaseID: leaseID)
                         throw error // committed stream never emits message_stop on error/EOF
                     }
                 })
@@ -105,7 +112,9 @@ public actor SIWCBridge {
             return Self.error(error, status: status)
         }
     }
-    private func clearInflight(_ key: String) { inflight.remove(key) }
+    private func clearInflight(_ key: String, leaseID: UUID) {
+        if inflight[key] == leaseID { inflight.removeValue(forKey: key) }
+    }
     private func saveReplay(_ raw: [JSONValue], route: ModelRoute, assistant: [JSONObject], history: [AnthropicMessage], scope: String, sessionPresent: Bool) throws {
         guard sessionPresent else { return }
         let key = scope + ":" + Self.fingerprint(history + [AnthropicMessage(role: "assistant", content: assistant)])
@@ -140,7 +149,7 @@ public actor SIWCBridge {
         for tool in input.tools ?? [] {
             let type = tool.string("type") ?? "function"
             if type.hasPrefix("web_search_") || type == "web_search" {
-                native.append(JSONObject.from(["type": .string("web_search")]))
+                throw SIWCError.unsupported("native web_search result conversion; use a Claude-owned function tool")
             } else if type == "function" {
                 guard let name = tool.string("name"), !name.isEmpty, names.insert(name).inserted,
                       let schema = tool.object("input_schema") ?? tool.object("parameters") else { throw SIWCError.unsupported("invalid or duplicate tool schema") }
@@ -188,13 +197,36 @@ public actor SIWCBridge {
         guard pending.isEmpty else { throw SIWCError.unsupported("missing parallel tool results") }
     }
 
-    static func encode(_ message: AnthropicMessage) throws -> [JSONValue] {
-        guard message.role == "user" || message.role == "assistant" else { throw SIWCError.unsupported("message role") }
-        for block in message.content {
-            guard ["text", "image", "tool_use", "tool_result", "thinking", "redacted_thinking"].contains(block.string("type") ?? "") else {
-                throw SIWCError.unsupported(block.string("type") ?? "content block")
+    static func validateContent(_ blocks: [JSONObject], nested: Bool = false) throws {
+        for block in blocks {
+            switch block.string("type") {
+            case "text": guard block.string("text") != nil else { throw SIWCError.unsupported("malformed text") }
+            case "image":
+                guard let source = block.object("source"), source.string("type") == "base64",
+                      let data = source.string("data"), !data.isEmpty, IRResponsesCodec.decodeTolerantBase64(data) != nil,
+                      source.string("media_type")?.hasPrefix("image/") == true else { throw SIWCError.unsupported("image source must be valid inline base64") }
+            case "tool_use" where !nested:
+                guard block.string("id") != nil, block.string("name") != nil, block.object("input") != nil else { throw SIWCError.unsupported("malformed tool call") }
+            case "tool_result" where !nested:
+                if let content = block["content"] {
+                    switch content {
+                    case .string, .null: break
+                    case .array(let items):
+                        guard items.allSatisfy({ $0.objectValue != nil }) else { throw SIWCError.unsupported("tool result blocks") }
+                        try validateContent(items.compactMap(\.objectValue), nested: true)
+                    default: throw SIWCError.unsupported("tool result content")
+                    }
+                }
+            case "thinking", "redacted_thinking":
+                guard !nested else { throw SIWCError.unsupported("nested thinking block") }
+            default: throw SIWCError.unsupported(block.string("type") ?? "content block")
             }
         }
+    }
+
+    static func encode(_ message: AnthropicMessage) throws -> [JSONValue] {
+        guard message.role == "user" || message.role == "assistant" else { throw SIWCError.unsupported("message role") }
+        try validateContent(message.content)
         var items = IRResponsesCodec.encodeFullHistory([IRMessage(role: message.role,
             content: IRAnthropicCodec.decodeRequestBlocks(message.content.filter { $0.string("type") != "thinking" && $0.string("type") != "redacted_thinking" }))])
         let errors = Set(message.content.filter { $0.string("type") == "tool_result" && $0.bool("is_error") == true }.compactMap { $0.string("tool_use_id") })
@@ -213,12 +245,16 @@ public actor SIWCBridge {
     private struct Result: Sendable {
         var raw: [JSONValue] = [], assistant: [JSONObject] = [], hasTools = false, inputTokens = 0, outputTokens = 0
     }
-    private func run(stream: AsyncThrowingStream<JSONObject, Error>, writer: any HTTPBodyWriter, inputTokens: Int, model: String, beforeFinish: @Sendable (Result) async throws -> Void) async throws -> Result {
+    private func run(stream: AsyncThrowingStream<JSONObject, Error>, writer: any HTTPBodyWriter, inputTokens: Int, model: String, allowedTools: Set<String>, beforeFinish: @Sendable (Result) async throws -> Void) async throws -> Result {
+        try Task.checkCancellation()
         let encoder = AnthropicSSEEncoder(anthropicModel: model, writer: writer)
         try await encoder.startMessage(initialInputTokens: inputTokens)
         var result = Result(inputTokens: inputTokens)
         var completed = false
         var text = ""
+        var messageText = ""
+        var textIndex: Int?
+        var assistantBlocks: [Int: JSONObject] = [:]
         var toolBlocks: [String: Int] = [:], toolNames: [String: String] = [:], toolCalls: [String: String] = [:]
         var received: Set<String> = []
         var callOrder: [String: Int] = [:]
@@ -227,17 +263,23 @@ public actor SIWCBridge {
             try Task.checkCancellation()
             let type = event.string("type") ?? ""
             switch type {
-            case "response.output_text.delta":
-                let delta = event.string("delta") ?? ""; text += delta
+            case "response.output_text.delta", "response.refusal.delta":
+                let delta = event.string("delta") ?? ""; text += delta; messageText += delta
                 try await encoder.emitTextDelta(delta)
+                if textIndex == nil && !delta.isEmpty { textIndex = encoder.blockIndex }
             case "response.output_item.added":
                 guard let item = event.object("item"), item.string("type") == "function_call",
                       let itemID = item.string("id"), let callID = item.string("call_id"), let name = item.string("name"),
                       item.string("namespace") == "claude" else { break }
+                guard allowedTools.contains(name) else { throw SIWCError.remote("undeclared_tool_call") }
                 guard !received.contains(callID) else { throw SIWCError.remote("duplicate_tool_call_id") }
-                callOrder[callID] = callOrder.count
                 received.insert(callID); toolNames[itemID] = name; toolCalls[itemID] = callID
-                toolBlocks[itemID] = try await encoder.startToolUse(id: callID, name: name)
+                if !text.isEmpty, let index = textIndex {
+                    assistantBlocks[index] = JSONObject.from(["type": .string("text"), "text": .string(text)])
+                    text = ""; textIndex = nil
+                }
+                let index = try await encoder.startToolUse(id: callID, name: name)
+                toolBlocks[itemID] = index; callOrder[callID] = index
             case "response.function_call_arguments.delta":
                 guard let itemID = event.string("item_id"), let index = toolBlocks[itemID] else { throw SIWCError.remote("orphaned_tool_argument") }
                 let delta = event.string("delta") ?? ""
@@ -250,6 +292,7 @@ public actor SIWCBridge {
                     guard let id = item.string("call_id"), let name = item.string("name"),
                           item.string("namespace") == "claude", let json = item.string("arguments"),
                           let arguments = try? JSONDecoder().decode(JSONObject.self, from: Data(json.utf8)) else { throw SIWCError.remote("invalid_tool_call") }
+                    guard allowedTools.contains(name) else { throw SIWCError.remote("undeclared_tool_call") }
                     let itemID = item.string("id") ?? ""
                     if let index = toolBlocks[itemID] {
                         guard toolCalls[itemID] == id, toolNames[itemID] == name,
@@ -258,29 +301,29 @@ public actor SIWCBridge {
                         toolBlocks.removeValue(forKey: itemID)
                     } else {
                         guard received.insert(id).inserted else { throw SIWCError.remote("duplicate_tool_call_id") }
-                        callOrder[id] = callOrder.count
+                        if !text.isEmpty, let index = textIndex {
+                            assistantBlocks[index] = JSONObject.from(["type": .string("text"), "text": .string(text)])
+                            text = ""; textIndex = nil
+                        }
                         try await encoder.emitToolUseBlock(id: id, name: name, argumentsJSON: json)
+                        callOrder[id] = encoder.blockIndex
                     }
                     result.hasTools = true
-                    result.assistant.append(JSONObject.from(["type": .string("tool_use"), "id": .string(id), "name": .string(name), "input": .object(arguments)]))
+                    assistantBlocks[callOrder[id]!] = JSONObject.from(["type": .string("tool_use"), "id": .string(id), "name": .string(name), "input": .object(arguments)])
                 } else if item.string("type") == "message" {
-                    if text.isEmpty {
-                        text = (item.array("content") ?? []).compactMap { $0.objectValue?.string("text") }.joined()
-                        if !text.isEmpty { try await encoder.emitTextDelta(text) }
+                    let finalText = (item.array("content") ?? []).compactMap { $0.objectValue?.string("text") ?? $0.objectValue?.string("refusal") }.joined()
+                    if !messageText.isEmpty, messageText != finalText { throw SIWCError.remote("message_text_changed") }
+                    if messageText.isEmpty {
+                        text = finalText
+                        if !text.isEmpty { try await encoder.emitTextDelta(text); textIndex = encoder.blockIndex }
                     }
-                    if !text.isEmpty { result.assistant.append(JSONObject.from(["type": .string("text"), "text": .string(text)])); text = "" }
+                    if !text.isEmpty, let index = textIndex { assistantBlocks[index] = JSONObject.from(["type": .string("text"), "text": .string(text)]) }
+                    text = ""; messageText = ""; textIndex = nil
+                    try await encoder.closeOpenBlock()
                 } else if item.string("type") == "web_search_call" {
-                    let id = item.string("id") ?? "srvtoolu_" + UUID().uuidString
-                    let action = item.object("action") ?? JSONObject()
-                    let query = action.string("query") ?? (action.array("queries") ?? []).compactMap(\.stringValue).joined(separator: "\n")
-                    let results = (action.array("sources") ?? []).compactMap { source -> JSONObject? in
-                        guard let source = source.objectValue, let url = source.string("url") else { return nil }
-                        return JSONObject.from(["type": .string("web_search_result"), "url": .string(url),
-                            "title": .string(source.string("title") ?? url), "encrypted_content": .string("")])
-                    }
-                    try await encoder.emitServerToolUseBlock(id: id, name: "web_search", input: JSONObject.from(["query": .string(query)]))
-                    try await encoder.emitWebSearchToolResultBlock(toolUseID: id, content: results)
+                    throw SIWCError.unsupported("native web_search result conversion")
                 }
+
             case "response.completed":
                 completed = true
                 if let usage = event.object("response")?.object("usage") {
@@ -293,11 +336,9 @@ public actor SIWCBridge {
             }
         }
         guard completed, toolBlocks.isEmpty else { throw SIWCError.remote("interrupted_stream") }
-        if !text.isEmpty { result.assistant.append(JSONObject.from(["type": .string("text"), "text": .string(text)])) }
-        let tools = result.assistant.filter { $0.string("type") == "tool_use" }.sorted {
-            (callOrder[$0.string("id") ?? ""] ?? 0) < (callOrder[$1.string("id") ?? ""] ?? 0)
-        }
-        result.assistant = result.assistant.filter { $0.string("type") != "tool_use" } + tools
+        if !text.isEmpty, let index = textIndex { assistantBlocks[index] = JSONObject.from(["type": .string("text"), "text": .string(text)]) }
+        result.assistant = assistantBlocks.sorted { $0.key < $1.key }.map { $0.value }
+        try Task.checkCancellation()
         try await beforeFinish(result)
         encoder.updateFinalOutputTokens(result.outputTokens)
         try await encoder.finish(stopReasonHint: result.hasTools ? .toolUse : .endTurn)

@@ -7,7 +7,7 @@ private actor OAuthFixtureHTTP: SIWCHTTP {
     func send(_ request: URLRequest) async throws -> (Data, Int) {
         requests.append(request)
         if request.url?.path == "/v1/models" {
-            return (Data(#"{"models":[{"slug":"fixture-eligible","display_name":"Fixture","visibility":"list"},{"slug":"fixture-hidden","visibility":"hidden"}]}"#.utf8), 200)
+            return (Data(#"{"models":[{"slug":"fixture-eligible","display_name":"Fixture","visibility":"list","supported_reasoning_levels":[{"effort":"fixture-minimum"}]},{"slug":"fixture-hidden","visibility":"hidden"}]}"#.utf8), 200)
         }
         let json = #"{"access_token":"fixture-new","refresh_token":"fixture-rotated","token_type":"Bearer","expires_in":3600,"scope":"chatgpt.tokens.use.direct resource.invoke"}"#
         return (Data(json.utf8), 200)
@@ -111,6 +111,7 @@ struct SIWCAuthTests {
         #expect(models.count == 1)
         #expect(models.first?.id == "fixture-eligible")
         #expect(models.first?.accountID == account.id)
+        #expect(models.first?.detailsText.contains("fixture-minimum") == true)
         #expect(await http.count == 1)
     }
     @Test @MainActor func callbackListenerIsReadyBeforeBrowserURLIsReturned() async throws {

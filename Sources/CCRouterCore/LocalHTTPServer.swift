@@ -15,6 +15,7 @@ public struct HTTPResponse: Sendable {
 
     /// Body is either a pre-buffered Data block or a streaming producer.
     public let body: Body
+    public let release: (@Sendable () async -> Void)?
 
     /// Enum representing the two body forms.
     public enum Body: Sendable {
@@ -42,6 +43,7 @@ public struct HTTPResponse: Sendable {
         self.reasonPhrase = reasonPhrase
         self.headers = headers
         self.body = .data(body)
+        self.release = nil
     }
 
     /// New streaming initialiser for streaming responses (e.g. SSE).
@@ -49,12 +51,14 @@ public struct HTTPResponse: Sendable {
         statusCode: Int,
         reasonPhrase: String,
         headers: [String: String] = [:],
+        release: (@Sendable () async -> Void)? = nil,
         stream producer: @Sendable @escaping (HTTPBodyWriter) async throws -> Void
     ) {
         self.statusCode = statusCode
         self.reasonPhrase = reasonPhrase
         self.headers = headers
         self.body = .stream(producer)
+        self.release = release
     }
 
     public static func json<T: Encodable>(
@@ -250,7 +254,9 @@ public final class LocalHTTPServer {
         do {
             let request = try await receiveRequest(on: connection, buffer: &buffer)
             let response = await handler(request)
-            try await send(response: response, on: connection)
+            do { try await send(response: response, on: connection) }
+            catch { await response.release?(); throw error }
+            await response.release?()
         } catch let error as ResponseWriteError {
             switch error {
             case .committedStreamFailure(let underlying):

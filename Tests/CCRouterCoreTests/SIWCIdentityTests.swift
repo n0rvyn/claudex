@@ -5,6 +5,13 @@ import Testing
 
 private actor IdentityHTTP: SIWCHTTP {
     var token = ""
+    var pauseExchange = false
+    var exchangeStarted = false
+    var gate: CheckedContinuation<Void, Never>?
+    func pause() { pauseExchange = true }
+    func started() -> Bool { exchangeStarted }
+    func resume() { gate?.resume(); gate = nil }
+
     let jwks: Data
     init(jwks: Data) { self.jwks = jwks }
     func set(_ token: String) { self.token = token }
@@ -13,6 +20,10 @@ private actor IdentityHTTP: SIWCHTTP {
             return (Data(#"{"issuer":"https://auth.openai.com","jwks_uri":"https://auth.openai.com/fixture-jwks"}"#.utf8), 200)
         }
         if request.url?.path == "/fixture-jwks" { return (jwks, 200) }
+        if pauseExchange {
+            exchangeStarted = true
+            await withCheckedContinuation { gate = $0 }
+        }
         let data = try JSONSerialization.data(withJSONObject: ["access_token": "fixture-access", "refresh_token": "fixture-refresh",
             "id_token": token, "token_type": "Bearer", "scope": "chatgpt.tokens.use.direct resource.invoke", "expires_in": 3600])
         return (data, 200)
@@ -99,4 +110,18 @@ struct SIWCIdentityTests {
         }
         #expect(try await auth.accounts().isEmpty)
     }
+    @Test func cancelledExchangeCannotActivateRegistration() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("siwc-cancelled-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let rsa = try FixtureRSA(), http = IdentityHTTP(jwks: rsa.jwks)
+        let auth = SIWCAuth(store: SIWCStore(directory: directory), http: http)
+        let attempt = try await auth.begin(redirectURI: "http://127.0.0.1:19000/auth/callback")
+        await http.set(try rsa.token(nonce: attempt.nonce)); await http.pause()
+        let task = Task { try await auth.complete(callback: URL(string: attempt.redirectURI + "?state=" + attempt.state + "&code=fixture&client_id=oaiapp_fixture")!) }
+        while !(await http.started()) { await Task.yield() }
+        await auth.cancelSignIn(); await http.resume()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(try await auth.accounts().isEmpty)
+    }
+
 }

@@ -12,6 +12,7 @@ public struct ResponsesHTTPError: Error, LocalizedError, Sendable {
 public actor ResponsesClient {
     private let session: URLSession
     private let endpoint: URL
+    private var activeRequests: [UUID: URLSessionTask] = [:]
 
     public init(endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!) {
         let configuration = URLSessionConfiguration.default
@@ -40,6 +41,13 @@ public actor ResponsesClient {
         request payload: JSONObject,
         credentials: SubscriptionCredentials
     ) async throws -> AsyncThrowingStream<JSONObject, Error> {
+        try await streamEvents(request: payload, credentials: credentials, requestID: UUID())
+    }
+    public func cancelRequest(_ requestID: UUID) {
+        activeRequests.removeValue(forKey: requestID)?.cancel()
+    }
+    private func removeRequest(_ requestID: UUID) { activeRequests.removeValue(forKey: requestID) }
+    public func streamEvents(request payload: JSONObject, credentials: SubscriptionCredentials, requestID: UUID) async throws -> AsyncThrowingStream<JSONObject, Error> {
         let request = try makeRequest(payload: payload, credentials: credentials)
 
         let (bytes, response) = try await session.bytes(for: request)
@@ -50,14 +58,20 @@ public actor ResponsesClient {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             let bodyString = await Self.drainErrorBody(bytes)
+            bytes.task.cancel()
             throw ResponsesHTTPError(statusCode: httpResponse.statusCode, body: bodyString)
         }
 
-        return Self.parseStrictSSELines(bytes.lines)
+        let upstream = bytes.task
+        activeRequests[requestID] = upstream
+        return Self.parseStrictSSELines(bytes.lines, onTermination: { [self] in
+            upstream.cancel()
+            Task { await removeRequest(requestID) }
+        })
     }
 
     /// Parse complete SSE frames; malformed JSON and truncated frames fail closed.
-    internal static func parseStrictSSELines<S: AsyncSequence & Sendable>(_ lines: S)
+    internal static func parseStrictSSELines<S: AsyncSequence & Sendable>(_ lines: S, onTermination: @escaping @Sendable () -> Void = {})
         -> AsyncThrowingStream<JSONObject, Error> where S.Element == String {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -83,7 +97,7 @@ public actor ResponsesClient {
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            continuation.onTermination = { _ in task.cancel(); onTermination() }
         }
     }
 

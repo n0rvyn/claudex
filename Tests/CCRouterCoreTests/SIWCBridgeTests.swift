@@ -7,6 +7,9 @@ private struct SIWCFixtureAuth: SubscriptionSessionProviding {
 }
 private actor SIWCFixtureClient: ResponsesStreamingClient {
     var payloads: [JSONObject] = []
+    var cancellations: [UUID] = []
+    func cancelRequest(_ id: UUID) { cancellations.append(id) }
+    var cancelled: Int { cancellations.count }
     let scripts: [[JSONObject]]
     init(_ scripts: [[JSONObject]]) { self.scripts = scripts }
     func streamEvents(request: JSONObject, credentials: SubscriptionCredentials) async throws -> AsyncThrowingStream<JSONObject, Error> {
@@ -184,6 +187,72 @@ struct SIWCBridgeTests {
             #"[{"type":"tool_result","tool_use_id":"orphan","content":"unknown"}]"#] {
             #expect(throws: SIWCError.self) { try SIWCBridge.validateToolHistory(history(invalid)) }
         }
+    }
+
+    @Test func nativeWebSearchIsRejectedBeforeInference() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client)
+        #expect(await bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#, tools: #"[{"type":"web_search_20250305","name":"web_search"}]"#)).statusCode == 400)
+        #expect(await client.calls == 0)
+    }
+    @Test func undeclaredToolCannotBeEmittedAsExecutable() async throws {
+        let client = SIWCFixtureClient([[done(call("call_bad", itemID: "item_bad", name: "Undeclared")), completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client)
+        let writer = SIWCFixtureWriter()
+        await #expect(throws: SIWCError.self) { try await consume(bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#)), writer) }
+        #expect(!(await writer.text).contains("Undeclared"))
+        #expect(!(await writer.text).contains("message_stop"))
+    }
+
+    @Test func abandonedResponseReleasesUpstreamAndDoesNotClearANewerLease() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client)
+        let first = await bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#))
+        #expect(await bridge.pendingToolTurnsCount() == 1)
+        await first.release?()
+        #expect(await bridge.pendingToolTurnsCount() == 0)
+        #expect(await client.cancelled == 1)
+        let second = await bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#))
+        await first.release?()
+        #expect(await bridge.pendingToolTurnsCount() == 1)
+        await second.release?()
+        #expect(await bridge.pendingToolTurnsCount() == 0)
+    }
+    @Test func textAfterToolPreservesPrefixOrderAcrossBridgeRestart() async throws {
+        let reasoning = JSONObject.from(["type": .string("reasoning"), "encrypted_content": .string("opaque-order"), "id": .string("rs_order")])
+        let message = JSONObject.from(["type": .string("message"), "role": .string("assistant"), "phase": .string("final_answer"),
+            "content": .array([.object(JSONObject.from(["type": .string("output_text"), "text": .string("after tool")]))])])
+        let client = SIWCFixtureClient([[done(reasoning), done(call("call_order", itemID: "item_order")), done(message), completed], [completed]])
+        let store = SIWCReplayStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("siwc-order-" + UUID().uuidString))
+        let first = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: store)
+        try await consume(first.handleMessages(request(#"[{"role":"user","content":"hello"}]"#)), SIWCFixtureWriter())
+        let restarted = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: store)
+        let next = request(#"[{"role":"user","content":"hello"},{"role":"assistant","content":[{"type":"tool_use","id":"call_order","name":"Read","input":{"path":"a"}},{"type":"text","text":"after tool"}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_order","content":"file"}]}]"#)
+        try await consume(restarted.handleMessages(next), SIWCFixtureWriter())
+        let items = await client.payload(1).array("input") ?? []
+        #expect(items.contains { $0.objectValue?.string("encrypted_content") == "opaque-order" })
+        #expect(items.contains { $0.objectValue?.string("phase") == "final_answer" })
+    }
+    @Test func unsupportedImagesAndNestedResultsNeverSilentlyDisappear() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client)
+        let input = request(#"[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://example.invalid/image.png"}}]}]"#)
+        #expect(await bridge.handleMessages(input).statusCode == 400)
+        #expect(await client.calls == 0)
+        #expect(throws: SIWCError.self) { try SIWCBridge.validateContent([JSONObject.from(["type": .string("tool_result"), "content": .array([.object(JSONObject.from(["type": .string("unknown")]))])])]) }
+    }
+
+    @Test func cancelledPreflightNeverStartsInference() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client)
+        let input = request(#"[{"role":"user","content":"hello"}]"#)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await bridge.handleMessages(input)
+        }
+        #expect(await task.value.statusCode != 200)
+        #expect(await client.calls == 0)
+        #expect(await bridge.pendingToolTurnsCount() == 0)
     }
 
 }

@@ -17,6 +17,7 @@ final class AnthropicSSEEncoder: @unchecked Sendable {
     private let encoder = JSONEncoder()
     private var messageStarted = false
     private var currentBlockIndex = -1
+    var blockIndex: Int { currentBlockIndex }
     private var currentBlockKind: BlockKind? = nil
     private var finalOutputTokens = 0
 

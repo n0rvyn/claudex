@@ -509,7 +509,12 @@ private struct UpstreamSettingsTab: View {
                 Button("Load models available to this account") { Task { await model.loadChatGPTModelCatalog() } }
                     .disabled(model.isLoadingModelCatalog || !model.chatGPTAccounts.contains(where: { $0.active && $0.authorized }))
                 ForEach(model.availableChatGPTModels) { available in
-                    Text("\(available.label) · \(available.id)").font(MBFont.mono).textSelection(.enabled)
+                    VStack(alignment: .leading) {
+                        Text("\(available.label) · \(available.id)").font(MBFont.mono).textSelection(.enabled)
+                        DisclosureGroup("Account-reported model details") {
+                            Text(available.detailsText).font(MBFont.mono).textSelection(.enabled)
+                        }
+                    }
                 }
                 if let error = model.modelCatalogError { Text(error).foregroundStyle(MBColor.faultInk) }
                 Text("Existing routes are preserved. Availability does not establish subscription cost or supported reasoning effort.").font(.caption).foregroundStyle(MBColor.inkDim)

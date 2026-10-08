@@ -9,6 +9,9 @@ public protocol ResponsesStreamingClient: Sendable {
         credentials: SubscriptionCredentials
     ) async throws -> AsyncThrowingStream<JSONObject, Error>
 
+    func streamEvents(request: JSONObject, credentials: SubscriptionCredentials, requestID: UUID) async throws -> AsyncThrowingStream<JSONObject, Error>
+    func cancelRequest(_ requestID: UUID) async
+
     func perform(
         request payload: JSONObject,
         credentials: SubscriptionCredentials
@@ -36,4 +39,11 @@ public struct CountTokensResult: Codable, Sendable {
     public init(input_tokens: Int) {
         self.input_tokens = input_tokens
     }
+}
+
+public extension ResponsesStreamingClient {
+    func streamEvents(request: JSONObject, credentials: SubscriptionCredentials, requestID: UUID) async throws -> AsyncThrowingStream<JSONObject, Error> {
+        try await streamEvents(request: request, credentials: credentials)
+    }
+    func cancelRequest(_ requestID: UUID) async {}
 }
