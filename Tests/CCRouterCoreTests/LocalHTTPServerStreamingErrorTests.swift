@@ -135,7 +135,19 @@ struct LocalHTTPServerStreamingErrorTests {
             let server = makeServer(port)
             do {
                 try server.start()
-                try await Task.sleep(for: .milliseconds(100))
+                let deadline = ContinuousClock.now + .seconds(3)
+                while true {
+                    switch server.listenerState {
+                    case .ready: break
+                    case .failed(let error): throw error
+                    case .cancelled: throw CancellationError()
+                    default:
+                        guard ContinuousClock.now < deadline else { throw POSIXError(.ETIMEDOUT) }
+                        try await Task.sleep(for: .milliseconds(10))
+                        continue
+                    }
+                    break
+                }
                 return (server, port)
             } catch let error as NWError {
                 server.stop()

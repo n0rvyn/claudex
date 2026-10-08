@@ -6,9 +6,9 @@ public actor GatewayDaemon {
     private var server: LocalHTTPServer?
     private var startedAt: Date?
 
-    public init(configuration: RouterConfiguration = RouterConfiguration()) {
+    public init(configuration: RouterConfiguration = RouterConfiguration(), auth: any SubscriptionSessionProviding = SIWCAuth.shared) {
         self.configuration = configuration
-        self.bridge = SIWCBridge(configuration: configuration)
+        self.bridge = SIWCBridge(configuration: configuration, auth: auth, replayStore: SIWCReplayStore(directory: URL(fileURLWithPath: configuration.configurationPath).deletingLastPathComponent().appendingPathComponent("Replay")))
     }
 
     public func start() throws {
@@ -34,7 +34,7 @@ public actor GatewayDaemon {
         let tracePath = await TraceLogger.shared.path
         let recentTraceLines = await TraceLogger.shared.recentLines(limit: 8)
         let traceDiagnostics = await TraceLogger.shared.diagnostics(limit: 64)
-        return DoctorSnapshot(
+        var snapshot = DoctorSnapshot(
             host: configuration.host,
             port: configuration.port,
             daemonState: server == nil ? "stopped" : "running",
@@ -64,6 +64,8 @@ public actor GatewayDaemon {
             traceDiagnostics: traceDiagnostics,
             pendingToolTurnsCount: await bridge.pendingToolTurnsCount()
         )
+        snapshot.traffic = await bridge.trafficSnapshot()
+        return snapshot
     }
 
     public func applyRoutingUpdate(table: ModelRoutingTable, advisorRoute: ModelRoute) async {
@@ -75,6 +77,12 @@ public actor GatewayDaemon {
         configuration: RouterConfiguration,
         bridge: SIWCBridge
     ) async -> HTTPResponse {
+        await ClassifierDiagnostics.observe(request) {
+            await routeWithoutDiagnostics(request: request, configuration: configuration, bridge: bridge)
+        }
+    }
+
+    private static func routeWithoutDiagnostics(request: HTTPRequest, configuration: RouterConfiguration, bridge: SIWCBridge) async -> HTTPResponse {
         switch (request.method, request.path) {
         case ("HEAD", "/"):
             return HTTPResponse(statusCode: 200, reasonPhrase: "OK")
@@ -90,6 +98,7 @@ public actor GatewayDaemon {
 
         case ("POST", configuration.messagesPath):
             if let response = await rejectIfUnauthorized(request: request, configuration: configuration) {
+                await bridge.recordLocalAuthRejection()
                 return response
             }
             return await bridge.handleMessages(request)

@@ -7,21 +7,32 @@ public enum EffortPolicy {
     /// Observed on installed Claude Code 2.1.292; same effort-only control wire shape.
     public static let claudeCodeMessageBeta = "per-turn-control-2026-07-01"
 
-    /// A control message takes effect at the next user message and remains active.
+    public static let systemMessageBeta = "mid-conversation-system-2026-04-07"
+    public static let toolChangesBeta = "mid-conversation-tool-changes-2026-07-01"
+
+    /// A public output-config control message takes effect at the next user message and remains active.
     public static func clientEffort(_ input: AnthropicMessagesRequest, headers: [String: String]) throws -> String? {
+        let betas = (headers["anthropic-beta"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let native = betas.contains(claudeCodeMessageBeta)
         var active: JSONObject? = input.output_config
         var pending: JSONObject?
         for message in input.messages {
             if let control = message.output_config {
-                guard message.role == "system", message.content.isEmpty,
+                guard message.role == "system",
                       Set(control.values.keys) == Set(["effort"]), control.string("effort") != nil else {
-                    throw SIWCError.unsupported("per-message effort requires an empty system message containing only output_config.effort")
+                    throw SIWCError.unsupported("effort control requires a system message containing only output_config.effort")
                 }
-                let betas = (headers["anthropic-beta"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                guard message.content.isEmpty || (native && betas.contains(systemMessageBeta)) else {
+                    throw SIWCError.unsupported("nonempty effort control requires the native per-turn and mid-conversation system betas")
+                }
+                if !message.content.isEmpty { try SIWCBridge.validateSystemContent(message.content) }
                 guard betas.contains(messageBeta) || betas.contains(claudeCodeMessageBeta) else {
                     throw SIWCError.unsupported("per-message effort requires anthropic-beta: " + messageBeta)
                 }
-                pending = control
+                // Installed SDK Een attaches this control immediately after its
+                // user turn, including at the request tail. Public beta semantics
+                // remain next-user activation.
+                if native { active = control; pending = nil } else { pending = control }
             } else if message.role == "user", let next = pending { active = next; pending = nil }
         }
         guard let active, let value = active["effort"] else { return nil }

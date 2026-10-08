@@ -90,23 +90,27 @@ public struct AnthropicMessage: Codable, Sendable {
     public let role: String
     public let content: [JSONObject]
     public let output_config: JSONObject?
+    public let clear_at: String?
 
-    public init(role: String, content: [JSONObject], output_config: JSONObject? = nil) {
+    public init(role: String, content: [JSONObject], output_config: JSONObject? = nil, clear_at: String? = nil) {
         self.role = role
         self.content = content
         self.output_config = output_config
+        self.clear_at = clear_at
     }
 
     enum CodingKeys: String, CodingKey {
         case role
         case content
         case output_config
+        case clear_at
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.role = try container.decode(String.self, forKey: .role)
         self.output_config = try container.decodeIfPresent(JSONObject.self, forKey: .output_config)
+        self.clear_at = try container.decodeIfPresent(String.self, forKey: .clear_at)
 
         if let blocks = try? container.decode([JSONObject].self, forKey: .content) {
             self.content = blocks

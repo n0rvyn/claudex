@@ -190,6 +190,9 @@ public final class LocalHTTPServer {
         self.handler = handler
     }
 
+    // Tests wait on this instance, so another listener cannot satisfy readiness.
+    var listenerState: NWListener.State? { listener?.state }
+
     public func start() throws {
         guard listener == nil else { return }
 

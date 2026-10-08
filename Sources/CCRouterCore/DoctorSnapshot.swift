@@ -29,6 +29,7 @@ public struct DoctorSnapshot: Codable, Sendable {
     public let recentTraceLines: [String]
     public let traceDiagnostics: TraceDiagnostics
     public let pendingToolTurnsCount: Int
+    public var traffic: SIWCTrafficSnapshot? = nil
 
     public init(
         host: String,

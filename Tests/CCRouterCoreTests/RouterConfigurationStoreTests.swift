@@ -47,7 +47,7 @@ struct RouterConfigurationStoreTests {
         #expect(configuration.port == 4999)
         #expect(configuration.gatewayAuthToken == "env-token")
         #expect(configuration.subscriptionAuthFilePath == SIWCStore.defaultDirectory.path)
-        #expect(configuration.claudeEnvironmentSnippet.contains("ANTHROPIC_AUTH_TOKEN=env-token"))
+        #expect(configuration.claudeEnvironmentSnippet.contains("export ANTHROPIC_AUTH_TOKEN='env-token'"))
     }
 
     @Test

@@ -64,8 +64,13 @@ struct EffortPolicyTests {
         #expect(try EffortPolicy.clientEffort(value, headers: ["anthropic-beta": observed]) == "low")
         #expect(try EffortPolicy.resolve(route: route, requested: EffortPolicy.clientEffort(value, headers: ["anthropic-beta": observed]), thinking: JSONObject.from(["type": .string("adaptive"), "display": .string("updates")]), catalog: catalog(), accountID: "a").reasoningEffort == "low")
         #expect(throws: SIWCError.self) { try EffortPolicy.clientEffort(value, headers: ["anthropic-beta": "effort-2025-11-24"]) }
-        let malformed = try input(#"[{"role":"system","content":"not empty","output_config":{"effort":"low"}},{"role":"user","content":"x"}]"#)
+        let malformed = try input(#"[{"role":"user","content":"not empty","output_config":{"effort":"low"}},{"role":"user","content":"x"}]"#)
         #expect(throws: SIWCError.self) { try EffortPolicy.clientEffort(malformed, headers: ["anthropic-beta": observed]) }
     }
 
+    @Test func nativeTailEffortAppliesToCurrentUserWhilePublicControlWaits() throws {
+        let value = try input(#"[{"role":"user","content":"one"},{"role":"system","content":[],"output_config":{"effort":"low"}}]"#)
+        #expect(try EffortPolicy.clientEffort(value, headers: ["anthropic-beta": EffortPolicy.claudeCodeMessageBeta]) == "low")
+        #expect(try EffortPolicy.clientEffort(value, headers: ["anthropic-beta": EffortPolicy.messageBeta]) == "high")
+    }
 }

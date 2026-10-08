@@ -6,6 +6,7 @@ struct SIWCReplayRecord: Codable, Sendable {
     let key: String
     let output: [JSONValue]
     let route: ModelRoute
+    var advisorRoute: ModelRoute? = nil
 }
 /// Transcript-prefix sidecars retain raw Responses items, including phase and opaque reasoning.
 /// Files are hashed by account + session + prefix; they never appear in diagnostics.

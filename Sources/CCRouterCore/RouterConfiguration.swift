@@ -195,6 +195,18 @@ public struct RouterConfiguration: Codable, Sendable, Equatable {
     }
 
     public var claudeEnvironmentSnippet: String {
-        "ANTHROPIC_BASE_URL=\(endpoint)\nANTHROPIC_AUTH_TOKEN=\(gatewayAuthToken)"
+        "export ANTHROPIC_BASE_URL=\(Self.shellQuote(endpoint))\nexport ANTHROPIC_AUTH_TOKEN=\(Self.shellQuote(gatewayAuthToken))"
+    }
+
+    /// Bare mode requires an explicit API key. Reuse the user-exported local
+    /// gateway token, and force this app's endpoint for the one client process.
+    /// This command contains no token value and does not change saved settings.
+    public var claudeConnectionCheckCommand: String {
+        "ANTHROPIC_BASE_URL=" + Self.shellQuote(endpoint)
+        + #" ANTHROPIC_API_KEY="${ANTHROPIC_AUTH_TOKEN:?Paste the connection exports first}" claude --bare --tools "" --effort low --system-prompt 'Reply concisely.' -p --output-format json -- 'Reply exactly SMOKEOK.'"#
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

@@ -57,6 +57,7 @@ public actor ResponsesClient {
             throw ResponsesHTTPError(statusCode: -1, body: "Missing HTTPURLResponse")
         }
 
+        await ClassifierDiagnostics.log(JSONObject.from(["event": .string("upstream_http"), "endpoint": .string("/v1/responses"), "status": .number(Double(httpResponse.statusCode))]))
         guard (200..<300).contains(httpResponse.statusCode) else {
             let bodyString = await Self.drainErrorBody(bytes)
             bytes.task.cancel()

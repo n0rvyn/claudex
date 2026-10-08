@@ -20,6 +20,7 @@ final class AnthropicSSEEncoder: @unchecked Sendable {
     var blockIndex: Int { currentBlockIndex }
     private var currentBlockKind: BlockKind? = nil
     private var finalOutputTokens = 0
+    private var finalInputTokens: Int?
 
     enum BlockKind: Equatable { case text, toolUse, serverToolUse, advisorToolResult, webSearchToolResult, thinking }
     enum StopReasonHint { case endTurn, toolUse, advisor }
@@ -269,6 +270,16 @@ final class AnthropicSSEEncoder: @unchecked Sendable {
     func updateFinalOutputTokens(_ value: Int) {
         finalOutputTokens = value
     }
+    func updateFinalInputTokens(_ value: Int) { finalInputTokens = value }
+
+    func emitCompleteBlock(_ block: JSONObject) async throws {
+        try await closeOpenBlock()
+        currentBlockIndex += 1
+        try await send(event: "content_block_start", data: JSONObject.from([
+            "type": .string("content_block_start"), "index": .number(Double(currentBlockIndex)), "content_block": .object(block)
+        ]))
+        try await stopToolUse(index: currentBlockIndex)
+    }
 
     /// Must be called last. Closes any open block, then emits message_delta and
     /// message_stop. Calls closeOpenBlock first so missing upstream output_item.done
@@ -283,15 +294,15 @@ final class AnthropicSSEEncoder: @unchecked Sendable {
         case .advisor:  stopReason = "end_turn"
         }
 
+        var usage = JSONObject.from(["output_tokens": .number(Double(max(1, finalOutputTokens)))])
+        if let finalInputTokens { usage["input_tokens"] = .number(Double(finalInputTokens)) }
         try await send(event: "message_delta", data: JSONObject.from([
             "type": .string("message_delta"),
             "delta": .object(JSONObject.from([
                 "stop_reason": .string(stopReason),
                 "stop_sequence": .null,
             ])),
-            "usage": .object(JSONObject.from([
-                "output_tokens": .number(Double(max(1, finalOutputTokens))),
-            ])),
+            "usage": .object(usage),
         ]))
         try await send(event: "message_stop", data: JSONObject.from(["type": .string("message_stop")]))
     }
