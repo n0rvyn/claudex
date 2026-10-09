@@ -5,7 +5,7 @@ import Testing
 
 @MainActor struct SimplifiedUXStateTests {
     @Test func invalidOnboardingStatesBlockStart() {
-        for state in ["signedOut", "signingIn", "authError", "loading", "catalogError", "switched", "retired", "unsupported"] {
+        for state in ["signedOut", "signingIn", "authError", "retired", "unsupported"] {
             let model = AppModel.visualFixture(state)
             #expect(!model.canStartDaemon)
             model.startDaemon()
@@ -24,7 +24,7 @@ import Testing
         ready.stopDaemon()
         #expect(!ready.daemonIsRunning)
         ready.selectChatGPTAccount("different-account")
-        #expect(!ready.canStartDaemon && !ready.modelCatalogUsable)
+        #expect(ready.canStartDaemon && !ready.modelCatalogUsable)
     }
     @Test func simpleModeRetainsRulesAndReactivationValidatesThem() async {
         let model = AppModel.visualFixture("ready")
@@ -108,6 +108,39 @@ import Testing
         #expect(model.currentConfiguration.routingTable == valid && !model.daemonIsRunning)
     }
 
+    @Test func savedGatewayStartsAndRestartsWithoutFreshCatalog() {
+        for state in ["ready", "loading", "catalogError", "switched"] {
+            let model = AppModel.visualFixture(state)
+            if let snapshot = model.modelCatalogSnapshot {
+                model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: snapshot.accountID,
+                    fetchedAt: Date().addingTimeInterval(-7200), models: snapshot.models)
+            }
+            model.modelCatalogError = "Offline fixture"
+            #expect(model.canStartDaemon)
+            model.startDaemon()
+            #expect(model.daemonIsRunning)
+            model.stopDaemon()
+            #expect(model.canStartDaemon)
+            model.startDaemon()
+            #expect(model.daemonIsRunning)
+            #expect(!model.modelCatalogUsable)
+        }
+    }
+
+    @Test func connectionExportsUseVerifiedWindowWithoutChangingGlobalSettings() {
+        let model = AppModel.visualFixture("ready")
+        #expect(model.claudeCompactionWindow == nil) // Fixture metadata has no window.
+        #expect(!model.claudeLaunchSnippet.contains("CLAUDE_CODE_AUTO_COMPACT_WINDOW"))
+        let details = JSONObject.from(["context_window": .number(272000), "max_context_window": .number(872000)])
+        let metadata = SIWCModelSummary(id: "gpt-6-luna", label: "Fixture", accountID: "demo-account", details: details)
+        model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: "demo-account", fetchedAt: Date().addingTimeInterval(-7200), models: [metadata])
+        #expect(model.claudeCompactionWindow == 272000)
+        #expect(model.claudeLaunchSnippet.hasSuffix("export CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000"))
+        model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: "other-account", fetchedAt: Date(), models: [metadata])
+        #expect(model.claudeCompactionWindow == nil)
+        #expect(!model.claudeLaunchSnippet.contains("CLAUDE_CODE_AUTO_COMPACT_WINDOW"))
+    }
+
 }
 
 
@@ -123,4 +156,6 @@ import Testing
         return configuration
     }
     func regenerateGatewayToken(from configuration: RouterConfiguration) -> RouterConfiguration { value }
+
+
 }

@@ -550,14 +550,14 @@ final class AppModel: ObservableObject {
     }
     var modelCatalogStatus: String {
         if isLoadingModelCatalog { return "Updating account models…" }
-        if let error = modelCatalogError { return "Models unavailable: " + error }
+        if let error = modelCatalogError { return (modelCatalogSnapshot == nil ? "Models unavailable: " : "Using last verified model list; refresh failed: ") + error }
         guard let snapshot = modelCatalogSnapshot else { return "Sign in or refresh the account model list." }
         let stamp = snapshot.fetchedAt.formatted(date: .abbreviated, time: .shortened)
         return modelCatalogUsable ? "Account models · updated " + stamp + " · cache valid for 1 hour"
-            : "Model list expired · last updated " + stamp + " · refresh required"
+            : "Model list stale · last updated " + stamp + " · refresh to discover changes"
     }
     func routingCatalogError(_ routes: [ModelRoute]) -> String? {
-        guard modelCatalogUsable, let snapshot = modelCatalogSnapshot else { return "Refresh the selected account's model list before saving or starting the gateway." }
+        guard modelCatalogUsable, let snapshot = modelCatalogSnapshot else { return "Refresh the selected account's model list before saving new routing choices." }
         return routes.compactMap { snapshot.validationError(for: $0) }.first
     }
     private var savedExecutorRoutes: [ModelRoute] {
@@ -570,7 +570,7 @@ final class AppModel: ObservableObject {
     }
     var claudeLaunchSnippet: String {
         guard let window = claudeCompactionWindow else { return envSnippet }
-        return envSnippet + \"\nexport CLAUDE_CODE_AUTO_COMPACT_WINDOW=\(window)\"
+        return envSnippet + "\nexport CLAUDE_CODE_AUTO_COMPACT_WINDOW=\(window)"
     }
     var savedRoutingCatalogError: String? {
         guard let snapshot = modelCatalogSnapshot,
@@ -590,7 +590,10 @@ final class AppModel: ObservableObject {
             modelCatalogSnapshot = snapshot; availableChatGPTModels = snapshot.models; modelCatalogError = nil
         } catch {
             guard modelCatalogLease == lease else { return }
-            availableChatGPTModels = []; modelCatalogSnapshot = nil; modelCatalogError = error.localizedDescription
+            modelCatalogSnapshot = try? await modelCatalog.cached(accountID: expectedAccount)
+            availableChatGPTModels = modelCatalogSnapshot?.models ?? []
+            modelCatalogError = error.localizedDescription
+            if SIWCModelCatalog.isAuthorizationFailure(error) { authState = .authorizationRequired }
         }
     }
     func loadChatGPTAccounts(forceCatalogRefresh: Bool = false) async {
@@ -866,6 +869,9 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func stopForTermination() async {
+        await daemon.stop()
+    }
     func quit() {
         NSApplication.shared.terminate(nil)
     }
@@ -1216,6 +1222,16 @@ struct RecordedRequestTrend: Equatable {
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openSettings) private var openSettings
+    private func showSettings(_ tab: SettingsTab) {
+        model.settingsTab = tab
+        openSettings()
+        DispatchQueue.main.async {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApplication.shared.windows.first {
+                $0.identifier?.rawValue == "com_apple_SwiftUI_Settings_window"
+            }?.makeKeyAndOrderFront(nil)
+        }
+    }
     private var trend: RecordedRequestTrend { RecordedRequestTrend(buckets: model.traffic?.buckets ?? Array(repeating: 0, count: 5), available: model.traffic != nil) }
     private var trafficWindow: String {
         guard let start = model.traffic?.startedAt, Date().timeIntervalSince(start) < 300 else { return "Last 5 min" }
@@ -1272,12 +1288,13 @@ struct ContentView: View {
             }
             HStack {
                 Spacer(minLength: 0)
-                Button { model.settingsTab = .diagnostics; openSettings() } label: {
+                Button { showSettings(.diagnostics) } label: {
                     Label("Activity", systemImage: "waveform.path")
                 }
-                Button { model.settingsTab = .upstream; openSettings() } label: {
+                Button { showSettings(.upstream) } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
+                Button("Quit", action: model.quit).keyboardShortcut("q")
             }.buttonStyle(.borderless).controlSize(.small).font(MBFont.caption)
         }
         .font(MBFont.label).tint(MBColor.brand).padding(14).frame(width: 340).background(MBColor.paper)
