@@ -10,6 +10,18 @@ public struct SIWCModelCatalogSnapshot: Codable, Sendable {
         let age = now.timeIntervalSince(fetchedAt)
         return age >= 0 && age < maxAge
     }
+    /// Use the advertised normal window, never the experimental maximum.
+    /// All possible saved routes must have verified same-account metadata.
+    public func claudeCompactionWindow(for routes: [ModelRoute]) -> Int? {
+        guard !routes.isEmpty, models.allSatisfy({ $0.accountID == accountID }) else { return nil }
+        let windows = routes.compactMap { route -> Int? in
+            guard let model = models.first(where: { $0.id == route.upstreamModel }),
+                  let window = model.details["context_window"]?.intValue, window >= 100_000 else { return nil }
+            return min(window, 1_000_000)
+        }
+        guard windows.count == routes.count else { return nil }
+        return windows.min()
+    }
     public func validationError(for route: ModelRoute) -> String? {
         guard let model = models.first(where: { $0.id == route.upstreamModel }) else {
             return "Model \(route.upstreamModel) is unavailable to the selected account. Choose a model from the refreshed list."
@@ -52,10 +64,33 @@ public actor SIWCModelCatalog {
             try save(snapshot)
             return snapshot
         } catch {
-            // A failed explicit refresh must not revive a previously cached entitlement.
-            try? FileManager.default.removeItem(at: path(accountID))
+            // Transport failures do not invalidate verified metadata. Explicit
+            // authorization/identity failures do; actual model errors still surface.
+            if let failure = error as? SIWCError {
+                switch failure {
+                case .signInRequired, .invalidIdentity, .permissionRequired:
+                    try? FileManager.default.removeItem(at: path(accountID))
+                case .remote("model_catalog_account_mismatch"), .remote("model_catalog_401"), .remote("model_catalog_403"):
+                    try? FileManager.default.removeItem(at: path(accountID))
+                default: break
+                }
+            }
             throw error
         }
+    }
+    /// Verified account-scoped metadata remains usable while offline; freshness
+    /// describes discovery age, not whether the gateway can bind its local socket.
+    public nonisolated static func isAuthorizationFailure(_ error: any Error) -> Bool {
+        guard let error = error as? SIWCError else { return false }
+        switch error {
+        case .signInRequired, .invalidIdentity, .permissionRequired, .remote("model_catalog_401"), .remote("model_catalog_403"): return true
+        default: return false
+        }
+    }
+    public func cached(accountID: String) throws -> SIWCModelCatalogSnapshot? { try read(accountID) }
+    public func runtimeSnapshot(accountID: String) async throws -> SIWCModelCatalogSnapshot {
+        if let snapshot = try read(accountID) { return snapshot }
+        return try await load(accountID: accountID)
     }
     private func path(_ accountID: String) -> URL {
         let digest = SHA256.hash(data: Data(accountID.utf8)).map { String(format: "%02x", $0) }.joined()

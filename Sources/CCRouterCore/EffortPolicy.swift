@@ -52,8 +52,8 @@ public enum EffortPolicy {
     }
 
     public static func resolve(route: ModelRoute, requested: String?, thinking: JSONObject?, catalog: SIWCModelCatalogSnapshot, accountID: String) throws -> ModelRoute {
-        guard catalog.accountID == accountID, catalog.isFresh(), catalog.models.allSatisfy({ $0.accountID == accountID }) else {
-            throw SIWCError.unsupported("fresh model capabilities for the selected account are required; refresh models")
+        guard catalog.accountID == accountID, catalog.models.allSatisfy({ $0.accountID == accountID }) else {
+            throw SIWCError.unsupported("verified model capabilities for the selected account are required; refresh models")
         }
         guard let model = catalog.models.first(where: { $0.id == route.upstreamModel }),
               let ceiling = levels.firstIndex(of: route.reasoningEffort), model.scalarReasoningEfforts.contains(route.reasoningEffort) else {

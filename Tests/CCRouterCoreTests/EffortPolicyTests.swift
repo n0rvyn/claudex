@@ -30,8 +30,8 @@ struct EffortPolicyTests {
         }
         #expect(try EffortPolicy.resolve(route: route, requested: "low", thinking: JSONObject.from(["type": .string("adaptive")]), catalog: catalog(), accountID: "a").reasoningEffort == "low")
     }
-    @Test func accountFreshnessAndMissingMetadataFailClosed() {
-        for value in [catalog(account: "b"), catalog(date: Date().addingTimeInterval(-3601)), catalog([])] {
+    @Test func accountAndMissingMetadataFailClosed() {
+        for value in [catalog(account: "b"), catalog([])] {
             #expect(throws: SIWCError.self) { try EffortPolicy.resolve(route: route, requested: "low", thinking: nil, catalog: value, accountID: "a") }
         }
         let switched = ModelRoute(upstreamModel: "other", reasoningEffort: "high", textVerbosity: "low")
@@ -73,4 +73,10 @@ struct EffortPolicyTests {
         #expect(try EffortPolicy.clientEffort(value, headers: ["anthropic-beta": EffortPolicy.claudeCodeMessageBeta]) == "low")
         #expect(try EffortPolicy.clientEffort(value, headers: ["anthropic-beta": EffortPolicy.messageBeta]) == "high")
     }
+    @Test func staleVerifiedCapabilitiesRetainOrdinalEffortCeiling() throws {
+        let result = try EffortPolicy.resolve(route: route, requested: "low", thinking: nil,
+            catalog: catalog(date: Date().addingTimeInterval(-3601)), accountID: "a")
+        #expect(result.reasoningEffort == "low")
+    }
+
 }

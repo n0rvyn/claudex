@@ -136,7 +136,8 @@ struct SettingsRoutingEditorTests {
         let models = model.availableChatGPTModels
         model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: "fixture-account", fetchedAt: Date().addingTimeInterval(-3601), models: models)
         #expect(!model.modelCatalogUsable)
-        #expect(model.savedRoutingCatalogError != nil)
+        #expect(model.savedRoutingCatalogError == nil)
+        #expect(model.routingCatalogError([model.currentConfiguration.routingTable.fallback]) != nil)
         model.modelCatalogSnapshot = SIWCModelCatalogSnapshot(accountID: "other-account", fetchedAt: Date(), models: models)
         #expect(!model.modelCatalogUsable)
     }

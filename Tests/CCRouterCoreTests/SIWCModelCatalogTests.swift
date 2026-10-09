@@ -48,17 +48,18 @@ struct SIWCModelCatalogTests {
         #expect(await fixture.calls == 2)
         #expect(!results.0.isFresh(at: old))
     }
-    @Test func failedRefreshInvalidatesDiskCacheAndWrongAccountCannotPopulateIt() async throws {
+    @Test func offlineRefreshRetainsVerifiedCacheAndWrongAccountCannotPopulateIt() async throws {
         let dir = directory(); defer { try? FileManager.default.removeItem(at: dir) }
         let fixture = CatalogFixture()
         let catalog = SIWCModelCatalog(directory: dir, loader: { try await fixture.fetch() })
         _ = try await catalog.load(accountID: "account-a")
         await fixture.fail(true)
         await #expect(throws: SIWCError.self) { _ = try await catalog.load(accountID: "account-a", force: true) }
-        await #expect(throws: SIWCError.self) { _ = try await catalog.load(accountID: "account-a") }
-        #expect(await fixture.calls == 3)
+        let retained = try await catalog.runtimeSnapshot(accountID: "account-a")
+        #expect(retained.accountID == "account-a")
+        #expect(await fixture.calls == 2)
         await fixture.fail(false); await fixture.setAccount("account-b")
-        await #expect(throws: SIWCError.self) { _ = try await catalog.load(accountID: "account-a") }
+        await #expect(throws: SIWCError.self) { _ = try await catalog.load(accountID: "account-a", force: true) }
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).isEmpty)
     }
     @Test func routeValidationUsesMetadataAndNeverGuessesOrSelectsReplacement() async throws {
@@ -74,4 +75,35 @@ struct SIWCModelCatalogTests {
         #expect(models.first?.capabilitySummary == "Parallel tool calls: Yes")
         #expect(snapshot.models.map(\.id) == ["fixture-luna"])
     }
+    @Test func staleRuntimeCacheSurvivesRestartWithoutFetchingAndAuthFailuresInvalidate() async throws {
+        let dir = directory(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fixture = CatalogFixture(), old = Date(timeIntervalSince1970: 1000)
+        let first = SIWCModelCatalog(directory: dir, loader: { try await fixture.fetch() }, now: { old })
+        _ = try await first.load(accountID: "account-a")
+        await fixture.fail(true)
+        let restarted = SIWCModelCatalog(directory: dir, loader: { try await fixture.fetch() })
+        let snapshot = try await restarted.runtimeSnapshot(accountID: "account-a")
+        #expect(!snapshot.isFresh())
+        #expect(await fixture.calls == 1)
+        #expect(try await restarted.cached(accountID: "account-b") == nil)
+        let denied = SIWCModelCatalog(directory: dir, loader: { throw SIWCError.remote("model_catalog_403") })
+        await #expect(throws: SIWCError.self) { _ = try await denied.load(accountID: "account-a", force: true) }
+        #expect(try await denied.cached(accountID: "account-a") == nil)
+        #expect(SIWCModelCatalog.isAuthorizationFailure(SIWCError.remote("model_catalog_401")))
+        #expect(!SIWCModelCatalog.isAuthorizationFailure(SIWCError.remote("model_catalog_503")))
+    }
+
+    @Test func compactionWindowUsesVerifiedNormalMinimumAndRejectsUnknownRoutes() {
+        let models = [SIWCModelSummary(id: "a", label: "A", accountID: "fixture", details: JSONObject.from(["context_window": .number(272000), "max_context_window": .number(872000)])),
+            SIWCModelSummary(id: "b", label: "B", accountID: "fixture", details: JSONObject.from(["context_window": .number(200000)]))]
+        let snapshot = SIWCModelCatalogSnapshot(accountID: "fixture", fetchedAt: Date(), models: models)
+        func route(_ model: String) -> ModelRoute { ModelRoute(upstreamModel: model, reasoningEffort: "low", textVerbosity: "low") }
+        #expect(snapshot.claudeCompactionWindow(for: [route("a")]) == 272000)
+        #expect(snapshot.claudeCompactionWindow(for: [route("a"), route("b")]) == 200000)
+        #expect(snapshot.claudeCompactionWindow(for: [route("unknown")]) == nil)
+        #expect(snapshot.claudeCompactionWindow(for: []) == nil)
+        let small = SIWCModelCatalogSnapshot(accountID: "fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "small", label: "Small", accountID: "fixture", details: JSONObject.from(["context_window": .number(64000)]))])
+        #expect(small.claudeCompactionWindow(for: [route("small")]) == nil)
+    }
+
 }
