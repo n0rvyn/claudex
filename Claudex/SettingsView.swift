@@ -291,10 +291,10 @@ private struct AppInfoCard: View {
 private struct AboutSection: View {
     @ObservedObject var model: AppModel
 
-    private let privacyURL   = URL(string: "https://prickly-pentagon-3b6.notion.site/Privacy-Policy-34dd945c7a9b814e87b6ea016d49a747")
+    private let privacyURL   = URL(string: "https://norvyn.com/claudex-privacy")
     private let termsURL     = URL(string: "https://prickly-pentagon-3b6.notion.site/Terms-of-Use-34dd945c7a9b81acb4b7e1cae6deb37d")
-    private let supportURL   = URL(string: "https://prickly-pentagon-3b6.notion.site/Support-34dd945c7a9b810ba78cc1bce08a6a8e")
-    private let marketingURL = URL(string: "https://prickly-pentagon-3b6.notion.site/Market-Claudex-34dd945c7a9b8193a7bbe8d5b4a439bf")
+    private let supportURL   = URL(string: "https://norvyn.com/claudex-support")
+    private let marketingURL = URL(string: "https://norvyn.com/claudex")
 
     var body: some View {
         MBSection(title: "About") {

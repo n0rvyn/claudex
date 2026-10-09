@@ -1,0 +1,584 @@
+{
+  "date": "2026-10-09",
+  "store": "us",
+  "entity": "macSoftware",
+  "limit": 50,
+  "rankings_verified": false,
+  "terms": [
+    {
+      "term": "Claudex",
+      "returned_count": 1,
+      "names": [
+        {
+          "id": 6795682556,
+          "name": "Token Gauge"
+        }
+      ]
+    },
+    {
+      "term": "LLM gateway",
+      "returned_count": 40,
+      "names": [
+        {
+          "id": 6753016821,
+          "name": "Cumbersome: AI LLM API Client"
+        },
+        {
+          "id": 6448106860,
+          "name": "Private LLM - Local AI Chat"
+        },
+        {
+          "id": 6761291923,
+          "name": "XiFan LLM Gateway Status Ball"
+        },
+        {
+          "id": 310633997,
+          "name": "WhatsApp Messenger"
+        },
+        {
+          "id": 1454212098,
+          "name": "Bigin by Zoho CRM"
+        }
+      ]
+    },
+    {
+      "term": "API gateway",
+      "returned_count": 42,
+      "names": [
+        {
+          "id": 1232603544,
+          "name": "HTTPBot: API & HTTP Client"
+        },
+        {
+          "id": 6753016821,
+          "name": "Cumbersome: AI LLM API Client"
+        },
+        {
+          "id": 6760217982,
+          "name": "Model Proxy - LLM API Gateway"
+        },
+        {
+          "id": 6773765736,
+          "name": "MCP Beast: Local Gateway"
+        },
+        {
+          "id": 6446056234,
+          "name": "API Mocker Gateway"
+        }
+      ]
+    },
+    {
+      "term": "AI gateway",
+      "returned_count": 50,
+      "names": [
+        {
+          "id": 6738511300,
+          "name": "Microsoft Copilot"
+        },
+        {
+          "id": 6759009193,
+          "name": "Gab AI"
+        },
+        {
+          "id": 6741426692,
+          "name": "Locally AI by LM Studio"
+        },
+        {
+          "id": 6793150486,
+          "name": "Gork AI: AI Agent"
+        },
+        {
+          "id": 6758658190,
+          "name": "C.AI: AI Chatbot Assistant"
+        }
+      ]
+    },
+    {
+      "term": "model routing",
+      "returned_count": 27,
+      "names": [
+        {
+          "id": 1476902521,
+          "name": "inRoute – Intelligent Routing"
+        },
+        {
+          "id": 6472431552,
+          "name": "Karing"
+        },
+        {
+          "id": 1525505933,
+          "name": "Ducky Model Editor"
+        },
+        {
+          "id": 1008811516,
+          "name": "RailModeller Express"
+        },
+        {
+          "id": 498366515,
+          "name": "Concorde TSP"
+        }
+      ]
+    },
+    {
+      "term": "model proxy",
+      "returned_count": 42,
+      "names": [
+        {
+          "id": 6760217982,
+          "name": "Model Proxy - LLM API Gateway"
+        },
+        {
+          "id": 932747118,
+          "name": "Shadowrocket"
+        },
+        {
+          "id": 6504287215,
+          "name": "Happ - Proxy Utility"
+        },
+        {
+          "id": 6794257189,
+          "name": "Clash - Rule Based Proxy"
+        },
+        {
+          "id": 6766003090,
+          "name": "Everywhere Proxy"
+        }
+      ]
+    },
+    {
+      "term": "coding assistant",
+      "returned_count": 44,
+      "names": [
+        {
+          "id": 6769354677,
+          "name": "AI Coding Assistant : Code AI"
+        },
+        {
+          "id": 6758658190,
+          "name": "C.AI: AI Chatbot Assistant"
+        },
+        {
+          "id": 6757243830,
+          "name": "LingCode"
+        },
+        {
+          "id": 6757811698,
+          "name": "Co-work - AI Agent Assistant"
+        },
+        {
+          "id": 6446281278,
+          "name": "ObfusCat: AI Code Assistant"
+        }
+      ]
+    },
+    {
+      "term": "developer tools",
+      "returned_count": 38,
+      "names": [
+        {
+          "id": 640199958,
+          "name": "Apple Developer"
+        },
+        {
+          "id": 899247664,
+          "name": "TestFlight"
+        },
+        {
+          "id": 6639614589,
+          "name": "Developer Tools - Tooly"
+        },
+        {
+          "id": 6760317500,
+          "name": "DevForge - Developer Tools"
+        },
+        {
+          "id": 1577374289,
+          "name": "Developer Tools: Exabox"
+        }
+      ]
+    },
+    {
+      "term": "local proxy",
+      "returned_count": 45,
+      "names": [
+        {
+          "id": 932747118,
+          "name": "Shadowrocket"
+        },
+        {
+          "id": 6504287215,
+          "name": "Happ - Proxy Utility"
+        },
+        {
+          "id": 6794257189,
+          "name": "Clash - Rule Based Proxy"
+        },
+        {
+          "id": 6766003090,
+          "name": "Everywhere Proxy"
+        },
+        {
+          "id": 6744701950,
+          "name": "VX Proxy Client"
+        }
+      ]
+    },
+    {
+      "term": "localhost",
+      "returned_count": 43,
+      "names": [
+        {
+          "id": 6797968498,
+          "name": "io1: Publish Localhost"
+        },
+        {
+          "id": 6759808898,
+          "name": "Localhost Port Scanner"
+        },
+        {
+          "id": 497714887,
+          "name": "WebSSH - Sysadmin Toolbox"
+        },
+        {
+          "id": 1661733229,
+          "name": "LocalSend"
+        },
+        {
+          "id": 1381004916,
+          "name": "Discovery - DNS-SD Browser"
+        }
+      ]
+    },
+    {
+      "term": "CLI",
+      "returned_count": 43,
+      "names": [
+        {
+          "id": 1176074088,
+          "name": "Termius: SSH Client & Terminal"
+        },
+        {
+          "id": 6737554309,
+          "name": "Todo CLI: To Do List"
+        },
+        {
+          "id": 6761163709,
+          "name": "CLI Pulse"
+        },
+        {
+          "id": 1515852442,
+          "name": "Gedys Cache Manager"
+        },
+        {
+          "id": 6448362669,
+          "name": "NeoServer SSH Mosh Terminal"
+        }
+      ]
+    },
+    {
+      "term": "terminal",
+      "returned_count": 42,
+      "names": [
+        {
+          "id": 6504843668,
+          "name": "Terminux: SSH Client"
+        },
+        {
+          "id": 1176074088,
+          "name": "Termius: SSH Client & Terminal"
+        },
+        {
+          "id": 6756257851,
+          "name": "Termial – AI SSH Terminal"
+        },
+        {
+          "id": 6753069550,
+          "name": "Terminal Console"
+        },
+        {
+          "id": 6755022390,
+          "name": "Mobile SSH Terminal"
+        }
+      ]
+    },
+    {
+      "term": "token usage",
+      "returned_count": 47,
+      "names": [
+        {
+          "id": 6755173244,
+          "name": "Usage for Claude"
+        },
+        {
+          "id": 6760191068,
+          "name": "AI Token Usage Tracker"
+        },
+        {
+          "id": 6773230249,
+          "name": "Token Usage for Claude"
+        },
+        {
+          "id": 6762005507,
+          "name": "AIStats: AI Usage Tracker"
+        },
+        {
+          "id": 6789839147,
+          "name": "TokenWise - AI Quota Tracker"
+        }
+      ]
+    },
+    {
+      "term": "traffic monitor",
+      "returned_count": 42,
+      "names": [
+        {
+          "id": 6762046514,
+          "name": "NetTraffic - Speed Monitor"
+        },
+        {
+          "id": 1588373974,
+          "name": "Process Traffic Monitor"
+        },
+        {
+          "id": 1522870046,
+          "name": "Device Monitor²"
+        },
+        {
+          "id": 6790917603,
+          "name": "Router Monitor"
+        },
+        {
+          "id": 914450696,
+          "name": "Traffic"
+        }
+      ]
+    },
+    {
+      "term": "reasoning effort",
+      "returned_count": 22,
+      "names": [
+        {
+          "id": 1497474517,
+          "name": "ArguMap - Map Arguments"
+        },
+        {
+          "id": 1497474446,
+          "name": "ArguMap Pro - Map Arguments"
+        },
+        {
+          "id": 1464579365,
+          "name": "Assocy - The Smart Notebook"
+        },
+        {
+          "id": 406138521,
+          "name": "Thinkin' Things 1"
+        },
+        {
+          "id": 925758417,
+          "name": "Truth Table Builder"
+        }
+      ]
+    },
+    {
+      "term": "AI coding",
+      "returned_count": 48,
+      "names": [
+        {
+          "id": 6738511300,
+          "name": "Microsoft Copilot"
+        },
+        {
+          "id": 6758658190,
+          "name": "C.AI: AI Chatbot Assistant"
+        },
+        {
+          "id": 6446363818,
+          "name": "AICoding"
+        },
+        {
+          "id": 6447260513,
+          "name": "Code Converter AI"
+        },
+        {
+          "id": 6759583690,
+          "name": "CodeX: Code AI for Xcode"
+        }
+      ]
+    },
+    {
+      "term": "streaming",
+      "returned_count": 48,
+      "names": [
+        {
+          "id": 553245401,
+          "name": "Friendly Streaming Browser"
+        },
+        {
+          "id": 545519333,
+          "name": "Amazon Prime Video"
+        },
+        {
+          "id": 6449092750,
+          "name": "Easy Streaming"
+        },
+        {
+          "id": 6502647917,
+          "name": "Streaming Master"
+        },
+        {
+          "id": 6751184690,
+          "name": "Streaming for Netflix"
+        }
+      ]
+    },
+    {
+      "term": "loopback",
+      "returned_count": 23,
+      "names": [
+        {
+          "id": 6752986098,
+          "name": "Audio Capture, Sound Recorder"
+        },
+        {
+          "id": 1223241229,
+          "name": "XME LOOPS"
+        },
+        {
+          "id": 751755884,
+          "name": "Playback"
+        },
+        {
+          "id": 1146492302,
+          "name": "Songtree Music Maker - Sing, Jam & Record"
+        },
+        {
+          "id": 1289813088,
+          "name": "Prime MultiTrack App"
+        }
+      ]
+    },
+    {
+      "term": "模型路由",
+      "returned_count": 4,
+      "names": [
+        {
+          "id": 6760217982,
+          "name": "Model Proxy - LLM API Gateway"
+        },
+        {
+          "id": 6773765736,
+          "name": "MCP Beast: Local Gateway"
+        },
+        {
+          "id": 6797847364,
+          "name": "模型枢纽 ModelHub"
+        },
+        {
+          "id": 6769258552,
+          "name": "AgentOps Console"
+        }
+      ]
+    },
+    {
+      "term": "编程助手",
+      "returned_count": 45,
+      "names": [
+        {
+          "id": 1670083066,
+          "name": "Moss - AI Chat & Genie Chatbot"
+        },
+        {
+          "id": 6477226962,
+          "name": "AI Pro: Private AI Assistant"
+        },
+        {
+          "id": 6450893458,
+          "name": "智谱清言-AI智能体定制视频通话智能搜索深度推理问答聊天助手"
+        },
+        {
+          "id": 6760752545,
+          "name": "AI Assistant AI Chat Bot"
+        },
+        {
+          "id": 1607025551,
+          "name": "JavaScript: Learn Programming"
+        }
+      ]
+    }
+  ],
+  "competitor_metadata": [
+    {
+      "trackId": 6760217982,
+      "name": "Model Proxy - LLM API Gateway",
+      "seller": "志杰 张",
+      "genres": [
+        "Utilities",
+        "Developer Tools"
+      ],
+      "version": "2.5",
+      "released": "2026-03-11",
+      "versionReleased": "2026-08-29",
+      "rating": 0,
+      "ratingCount": 0,
+      "languages": [
+        "EN"
+      ],
+      "minimumOsVersion": "15.6",
+      "screenshots": 6,
+      "subtitle": "Token usage for Claude Code",
+      "keywords": "NOT READABLE — Apple exposes no public endpoint",
+      "storeName": "Model Proxy - LLM API Gateway"
+    },
+    {
+      "trackId": 6773765736,
+      "name": "MCP Beast: Local Gateway",
+      "seller": "SwiftLee",
+      "genres": [
+        "Developer Tools",
+        "Utilities"
+      ],
+      "version": "1.2.0",
+      "released": "2026-06-01",
+      "versionReleased": "2026-09-14",
+      "rating": 0,
+      "ratingCount": 0,
+      "languages": [
+        "EN",
+        "FR",
+        "DE",
+        "JA",
+        "KO",
+        "PT",
+        "ZH",
+        "ES"
+      ],
+      "minimumOsVersion": "26.0",
+      "screenshots": 6,
+      "subtitle": "ChatGPT, Claude, Codex, Cursor",
+      "keywords": "NOT READABLE — Apple exposes no public endpoint",
+      "storeName": "MCP Beast: Local Gateway"
+    },
+    {
+      "trackId": 6795682556,
+      "name": "Token Gauge",
+      "seller": "Morten Iversen",
+      "genres": [
+        "Productivity",
+        "Developer Tools"
+      ],
+      "version": "1.1.1",
+      "released": "2026-08-06",
+      "versionReleased": "2026-09-11",
+      "rating": 0,
+      "ratingCount": 0,
+      "languages": [
+        "EN"
+      ],
+      "minimumOsVersion": "26.4",
+      "screenshots": 3,
+      "subtitle": "Track your token usage limits",
+      "keywords": "NOT READABLE — Apple exposes no public endpoint",
+      "storeName": "Token Gauge"
+    }
+  ]
+}
