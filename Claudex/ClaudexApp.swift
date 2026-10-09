@@ -3,6 +3,8 @@ import CCRouterCore
 
 @main
 struct ClaudexApp: App {
+    @NSApplicationDelegateAdaptor(ClaudexAppDelegate.self) private var appDelegate
+    @StateObject private var dockIconPreference = DockIconPreference.shared
     @StateObject private var model: AppModel
     init() {
         #if DEBUG
@@ -39,6 +41,7 @@ struct ClaudexApp: App {
 
         Settings {
             DoctorSettingsView(model: model)
+                .environmentObject(dockIconPreference)
                 .frame(minWidth: 680, idealWidth: 820, maxWidth: .infinity, minHeight: 520, idealHeight: 660, maxHeight: .infinity)
                 .preferredColorScheme(preferredColorScheme)
         }

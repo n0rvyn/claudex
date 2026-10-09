@@ -123,6 +123,7 @@ private struct SettingsShell<Content: View>: View {
 
 private struct GeneralSettingsTab: View {
     @ObservedObject var model: AppModel
+    @EnvironmentObject private var dockIconPreference: DockIconPreference
     @AppStorage("claudex.appearance") private var appearanceRaw: Int = 0
 
     var body: some View {
@@ -137,6 +138,15 @@ private struct GeneralSettingsTab: View {
                         value: $appearanceRaw,
                         options: [(0, "Auto"), (1, "Light"), (2, "Dark")]
                     )
+                }
+                MBField(
+                    label: "Show Dock icon",
+                    help: "Keep Claudex in the Dock. The menu bar stays available when hidden."
+                ) {
+                    Toggle("Show Dock icon", isOn: $dockIconPreference.showDockIcon)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .accessibilityIdentifier("showDockIcon")
                 }
             }
 
