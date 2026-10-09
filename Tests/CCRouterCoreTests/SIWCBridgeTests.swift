@@ -711,4 +711,68 @@ struct SIWCBridgeTests {
         }
     }
 
+    @Test func compactedToolTurnSurvivesRestartAndPinsOriginalRawItemsAndRoute() async throws {
+        let client = SIWCFixtureClient([[done(JSONObject.from(["type": .string("reasoning"), "id": .string("reasoning-original"), "encrypted_content": .string("opaque-fixture")])), done(call("call_compact", itemID: "item_compact")), completed]])
+        let store = isolatedReplay()
+        let original = config()
+        let first = SIWCBridge(configuration: original, auth: SIWCFixtureAuth(), client: client, replayStore: store)
+        try await consume(first.handleMessages(request(#"[{"role":"user","content":"original prefix"}]"#)), SIWCFixtureWriter())
+        let restarted = SIWCBridge(configuration: original, auth: SIWCFixtureAuth(), client: client, replayStore: store)
+        await restarted.updateRouting(table: ModelRoutingTable(rules: [], fallback: ModelRoute(upstreamModel: "different-model", reasoningEffort: "high", textVerbosity: "low")), advisorRoute: original.advisorRoute)
+        let compacted = #"[{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. Summary fixture."},{"role":"assistant","content":[{"type":"tool_use","id":"call_compact","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_compact","content":"file"}]}]"#
+        #expect(await restarted.handleMessages(request(compacted, session: "other")).statusCode == 400)
+        #expect(await restarted.handleMessages(request(compacted.replacingOccurrences(of: "\"path\":\"a\"", with: "\"path\":\"b\""))).statusCode == 400)
+        try await consume(restarted.handleMessages(request(compacted)), SIWCFixtureWriter())
+        let payload = await client.payload(1)
+        #expect(payload.string("model") == original.routingTable.fallback.upstreamModel)
+        #expect(payload.object("reasoning")?.string("effort") == original.routingTable.fallback.reasoningEffort)
+        let items = payload.array("input") ?? []
+        #expect(items.contains { $0.objectValue?.string("encrypted_content") == "opaque-fixture" })
+        #expect(items.contains { $0.objectValue?.string("id") == "item_compact" })
+        #expect(!items.contains { $0.objectValue?.array("content")?.contains { $0.objectValue?.string("text") == "original prefix" } == true })
+    }
+    @Test func compactionRecoveryRejectsAmbiguousBranchesAndMissingCalls() throws {
+        let store = isolatedReplay()
+        let assistant = AnthropicMessage(role: "assistant", content: [JSONObject.from(["type": .string("tool_use"), "id": .string("call_collision"), "name": .string("Read"), "input": .object(JSONObject.from(["path": .string("a")]))])])
+        let raw = [JSONValue.object(call("call_collision", itemID: "item_collision"))]
+        try store.save(SIWCReplayRecord(key: "scope:prefix-one", output: raw, route: Self.route))
+        #expect(try store.compactedReplay(scope: "other", assistant: assistant) == nil)
+        #expect(try store.compactedReplay(scope: "scope", assistant: assistant)?.output == raw)
+        try store.save(SIWCReplayRecord(key: "scope:prefix-two", output: raw, route: Self.route))
+        #expect(throws: SIWCError.self) { try store.compactedReplay(scope: "scope", assistant: assistant) }
+    }
+
+    @Test func onlyGenuineContextErrorsUseClaudeRecoveryEnvelope() throws {
+        let genuine = ResponsesHTTPError(statusCode: 400, body: #"{"error":{"code":"context_length_exceeded","message":"private upstream details"}}"#)
+        #expect(SIWCBridge.isContextLimitError(genuine))
+        let response = SIWCBridge.error(genuine, status: 400)
+        guard case .data(let data) = response.body else { Issue.record("Expected buffered error"); return }
+        let envelope = try JSONDecoder().decode(JSONObject.self, from: data)
+        #expect(envelope.object("error")?.string("message") == "prompt is too long: upstream model context window exceeded")
+        for error in [ResponsesHTTPError(statusCode: 413, body: "Request entity too large"), ResponsesHTTPError(statusCode: 400, body: #"{"error":{"code":"invalid_schema"}}"#)] {
+            #expect(!SIWCBridge.isContextLimitError(error))
+        }
+        #expect(!SIWCBridge.isContextLimitError(SIWCError.remote("tool_continuation_replay_missing")))
+    }
+    @Test func tokenEstimateIncludesNamespacedToolSchemas() async throws {
+        let counter = AnthropicInputTokenCounter()
+        let plain = JSONObject.from(["input": .array([]), "tools": .array([])])
+        let namespaced = JSONObject.from(["input": .array([]), "tools": .array([.object(JSONObject.from(["type": .string("namespace"), "name": .string("claude"), "tools": .array([.object(JSONObject.from(["type": .string("function"), "name": .string("fixture"), "description": .string(String(repeating: "schema description ", count: 100)), "parameters": .object(JSONObject.from(["type": .string("object")]))]))])]))])])
+        #expect(try await counter.countInputTokens(for: namespaced) > counter.countInputTokens(for: plain))
+    }
+
+    @Test func committedContextFailureEmitsRecognizedErrorWithoutSuccessStop() async throws {
+        let failure = JSONObject.from(["type": .string("response.failed"), "response": .object(JSONObject.from(["error": .object(JSONObject.from(["code": .string("context_length_exceeded")]))]))])
+        let client = SIWCFixtureClient([[failure]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let writer = SIWCFixtureWriter()
+        await #expect(throws: SIWCError.self) { try await consume(bridge.handleMessages(request(#"[{"role":"user","content":"fixture"}]"#)), writer) }
+        let text = await writer.text
+        #expect(text.contains("event: error"))
+        #expect(text.contains("prompt is too long"))
+        #expect(!text.contains("message_stop"))
+        #expect(await bridge.pendingToolTurnsCount() == 0)
+        #expect(await client.calls == 1)
+    }
+
 }

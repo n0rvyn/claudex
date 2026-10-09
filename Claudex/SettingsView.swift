@@ -449,14 +449,14 @@ private struct ClaudeCodeSettingsTab: View {
             MBSection(title: "Connection exports") {
                 MBField(
                     label: "CLI snippet",
-                    help: "Paste these two exports into the shell that runs Claude Code.",
+                    help: "Paste these exports into the shell that starts Claude Code.",
                     stacked: true
                 ) {
                     VStack(alignment: .leading, spacing: 8) {
                         envSnippetBlock
                         HStack(spacing: 6) {
                             Button(action: { model.copyEnvSnippet() }) {
-                                Label("Copy both", systemImage: "doc.on.doc")
+                                Label("Copy exports", systemImage: "doc.on.doc")
                             }
                             .buttonStyle(.borderedProminent)
                             Button(action: { model.copyEndpoint() }) {
@@ -468,6 +468,14 @@ private struct ClaudeCodeSettingsTab: View {
                         }
                     }
                 }
+            }
+
+            if let window = model.claudeCompactionWindow {
+                Text("Claude Code compaction window: \(window.formatted()) tokens, using the smallest verified window across saved executor routes. Restart Claude Code after changing routes or models to apply the copied exports.")
+                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
+            } else {
+                Text("No verified context window is available for every saved route. Refresh models before generating a compaction limit.")
+                    .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
             }
 
             DisclosureGroup("Optional connection check") {
@@ -497,6 +505,10 @@ private struct ClaudeCodeSettingsTab: View {
                 + Text("ANTHROPIC_AUTH_TOKEN").foregroundStyle(MBColor.termInk)
                 + Text("=").foregroundStyle(MBColor.termDim)
                 + Text("<gateway-token>").foregroundStyle(MBColor.termInk)
+            }
+            if let window = model.claudeCompactionWindow {
+                Text("export CLAUDE_CODE_AUTO_COMPACT_WINDOW=\(window)")
+                    .foregroundStyle(MBColor.termInk)
             }
         }
         .font(MBFont.mono)

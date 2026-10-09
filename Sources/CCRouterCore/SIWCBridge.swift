@@ -18,7 +18,7 @@ public actor SIWCBridge {
     public init(configuration: RouterConfiguration, auth: any SubscriptionSessionProviding = SIWCAuth.shared,
                 client: any ResponsesStreamingClient = ResponsesClient(endpoint: URL(string: "https://api.openai.com/v1/responses")!),
                 counter: any AnthropicInputTokenCounting = AnthropicInputTokenCounter(), replayStore: SIWCReplayStore = SIWCReplayStore(),
-                catalogProvider: @escaping CatalogProvider = { try await SIWCModelCatalog().load(accountID: $0) }) {
+                catalogProvider: @escaping CatalogProvider = { try await SIWCModelCatalog().runtimeSnapshot(accountID: $0) }) {
         self.catalogProvider = catalogProvider
         let traffic = SIWCTraffic(directory: replayStore.directory)
         self.traffic = traffic
@@ -84,7 +84,7 @@ public actor SIWCBridge {
             if let lastAssistantIndex = input.messages.lastIndex(where: { $0.role == "assistant" }),
                input.messages.suffix(from: lastAssistantIndex + 1).contains(where: { $0.content.contains(where: { $0.string("type") == "tool_result" }) }) {
                 guard let pending = try await loadReplay(Array(input.messages[...lastAssistantIndex]), scope: scope) else {
-                    throw SIWCError.unsupported("tool continuation replay is unavailable; resolved model and effort cannot be restored")
+                    throw SIWCError.remote("tool_continuation_replay_missing: restart from a user turn or restore the original tool history")
                 }
                 route = pending.route
                 pinnedAdvisorRoute = pending.advisorRoute
@@ -161,6 +161,11 @@ public actor SIWCBridge {
                         await client.cancelRequest(leaseID)
                         await clearInflight(key, leaseID: leaseID)
                         await traffic.gatewayFinished(id: observationID, started: observationStarted, failed: !(error is CancellationError), cancelled: error is CancellationError)
+                        if Self.isContextLimitError(error), let body = Self.error(error, status: 400).bodyData {
+                            var frame = Data("event: error\ndata: ".utf8)
+                            frame.append(body); frame.append(Data("\n\n".utf8))
+                            try await writer.write(frame)
+                        }
                         throw error // committed stream never emits message_stop on error/EOF
                     }
                 })
@@ -182,7 +187,7 @@ public actor SIWCBridge {
     private func saveReplay(_ raw: [JSONValue], route: ModelRoute, advisorRoute: ModelRoute?, assistant: [JSONObject], history: [AnthropicMessage], scope: String, sessionPresent: Bool) async throws {
         guard sessionPresent else { return }
         let key = scope + ":" + Self.fingerprint(history + [AnthropicMessage(role: "assistant", content: assistant)])
-        try replayStore.save(SIWCReplayRecord(key: key, output: raw, route: route, advisorRoute: advisorRoute))
+        try replayStore.save(SIWCReplayRecord(key: key, output: raw, route: route, advisorRoute: advisorRoute, assistantFingerprint: Self.fingerprint([AnthropicMessage(role: "assistant", content: assistant)])))
         try await AcceptanceInferenceGuard.shared.observeReplay(history + [AnthropicMessage(role: "assistant", content: assistant)], scope: scope, stage: "save", cacheHit: true)
 
     }
@@ -194,6 +199,17 @@ public actor SIWCBridge {
         // hash alias a new temporary instruction boundary.
         if record == nil, legacy != canonical, history.allSatisfy({ $0.clear_at == nil }) {
             record = try replayStore.load(scope + ":" + legacy)
+        }
+        // Installed Claude Code's native compaction summary replaces the prefix.
+        // It is a format signal, not authority: exact complete assistant identity,
+        // account/session scope and uniqueness are still mandatory.
+        if record == nil, let assistant = history.last, assistant.role == "assistant",
+           history.allSatisfy({ $0.clear_at == nil }),
+           history.first?.role == "user",
+           history.first?.content.contains(where: {
+               $0.string("type") == "text" && ($0.string("text") ?? "").hasPrefix("This session is being continued from a previous conversation that ran out of context.")
+           }) == true {
+            record = try replayStore.compactedReplay(scope: scope, assistant: assistant)
         }
         try await AcceptanceInferenceGuard.shared.observeReplay(history, scope: scope, stage: "load", cacheHit: record != nil)
         return record
@@ -572,10 +588,23 @@ public actor SIWCBridge {
         try await encoder.finish(stopReasonHint: result.hasTools ? .toolUse : .endTurn)
         return result
     }
+    static func isContextLimitError(_ error: any Error) -> Bool {
+        let codes: Set<String> = ["context_length_exceeded", "prompt_too_long"]
+        if case SIWCError.remote(let code) = error { return codes.contains(code) }
+        guard let http = error as? ResponsesHTTPError, [400, 413].contains(http.statusCode),
+              let data = http.body.data(using: .utf8),
+              let body = try? JSONDecoder().decode(JSONObject.self, from: data),
+              let code = body.object("error")?.string("code") else { return false }
+        return codes.contains(code)
+    }
     static func error(_ error: any Error, status: Int) -> HTTPResponse {
         let type = status == 401 ? "authentication_error" : "invalid_request_error"
+        let message: String
+        if Self.isContextLimitError(error) {
+            message = "prompt is too long: upstream model context window exceeded"
+        } else { message = error.localizedDescription }
         return try! HTTPResponse.json(statusCode: status, reasonPhrase: "Request Failed",
-            value: AnthropicErrorEnvelope(error: AnthropicErrorBody(type: type, message: error.localizedDescription)))
+            value: AnthropicErrorEnvelope(error: AnthropicErrorBody(type: type, message: message)))
     }
 }
 private actor SIWCCollectingWriter: HTTPBodyWriter {

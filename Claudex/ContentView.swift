@@ -480,7 +480,7 @@ final class AppModel: ObservableObject {
             resolveAuthBlockingState(for: "copying the Claude environment")
             return
         }
-        copyToPasteboard(envSnippet)
+        copyToPasteboard(claudeLaunchSnippet)
         statusText = "Claude environment copied"
     }
 
@@ -560,8 +560,22 @@ final class AppModel: ObservableObject {
         guard modelCatalogUsable, let snapshot = modelCatalogSnapshot else { return "Refresh the selected account's model list before saving or starting the gateway." }
         return routes.compactMap { snapshot.validationError(for: $0) }.first
     }
+    private var savedExecutorRoutes: [ModelRoute] {
+        (currentConfiguration.routingTable.singleModelMode == true ? [] : currentConfiguration.routingTable.rules.map(\.route) + [currentConfiguration.routingTable.effectiveFableRoute]) + [currentConfiguration.routingTable.fallback]
+    }
+    var claudeCompactionWindow: Int? {
+        guard let snapshot = modelCatalogSnapshot,
+              snapshot.accountID == chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id else { return nil }
+        return snapshot.claudeCompactionWindow(for: savedExecutorRoutes)
+    }
+    var claudeLaunchSnippet: String {
+        guard let window = claudeCompactionWindow else { return envSnippet }
+        return envSnippet + \"\nexport CLAUDE_CODE_AUTO_COMPACT_WINDOW=\(window)\"
+    }
     var savedRoutingCatalogError: String? {
-        routingCatalogError((currentConfiguration.routingTable.singleModelMode == true ? [] : currentConfiguration.routingTable.rules.map(\.route)) + [currentConfiguration.routingTable.fallback])
+        guard let snapshot = modelCatalogSnapshot,
+              snapshot.accountID == chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id else { return nil }
+        return savedExecutorRoutes.compactMap { snapshot.validationError(for: $0) }.first
     }
     func loadChatGPTModelCatalog(force: Bool = true) async {
         guard let expectedAccount = chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id,

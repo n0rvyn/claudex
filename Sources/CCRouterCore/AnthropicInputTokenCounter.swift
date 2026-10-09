@@ -27,7 +27,11 @@ public struct AnthropicInputTokenCounter: AnthropicInputTokenCounting, Sendable 
             strings.append(contentsOf: try stringsForInputItem(item))
         }
 
-        for tool in payload.array("tools")?.compactMap(\.objectValue) ?? [] {
+        let wrappers = payload.array("tools")?.compactMap(\.objectValue) ?? []
+        let tools = wrappers.flatMap { tool in
+            tool.string("type") == "namespace" ? (tool.array("tools") ?? []).compactMap(\.objectValue) : [tool]
+        }
+        for tool in tools {
             if let name = tool.string("name"), !name.isEmpty {
                 strings.append(name)
             }
