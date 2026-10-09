@@ -33,6 +33,7 @@ struct ClaudexApp: App {
     }
 
     var body: some Scene {
+        let _ = { appDelegate.model = model }()
         MenuBarExtra("Claudex", systemImage: "terminal.fill") {
             ContentView(model: model)
                 .preferredColorScheme(preferredColorScheme)
