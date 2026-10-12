@@ -31,9 +31,7 @@ actor SIWCTraffic {
         startedAt = Date()
     }
     private func log(_ event: JSONObject) async {
-        await logger.log(event)
-        let path = await logger.path
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        await logger.log(event, permissions: 0o600)
     }
     private var activeRequests: Set<UUID> = []
     func gatewayRequest(id: UUID = UUID()) async {
@@ -57,16 +55,57 @@ actor SIWCTraffic {
         }
         await log(event)
     }
+    private var cachedEvents: [(time: Double, event: JSONObject)] = []
+    private var historicalStart: Date?
+    private var previousWindowStart: Double?
+    private let ledgerDecoder = JSONDecoder()
+
+    private func decodeLedgerLine(_ line: String) -> (time: Double, event: JSONObject)? {
+        guard let data = line.data(using: .utf8), let event = try? ledgerDecoder.decode(JSONObject.self, from: data),
+              case .number(let time)? = event["logged_at_unix_ms"] else { return nil }
+        return (time, event)
+    }
+
+    private var snapshotBusy = false
+    private var snapshotWaiters: [CheckedContinuation<Void, Never>] = []
+    private func acquireSnapshot() async {
+        if snapshotBusy { await withCheckedContinuation { snapshotWaiters.append($0) } }
+        else { snapshotBusy = true }
+    }
+    private func releaseSnapshot() {
+        if snapshotWaiters.isEmpty { snapshotBusy = false }
+        else { snapshotWaiters.removeFirst().resume() }
+    }
+
     func snapshot(now: Date = Date()) async -> SIWCTrafficSnapshot {
-        // Read the whole metadata ledger, not an arbitrary tail of mixed log stages.
-        let lines = await logger.recentLines(limit: Int.max)
-        var result = SIWCTrafficSnapshot(); result.startedAt = startedAt
+        await acquireSnapshot()
+        defer { releaseSnapshot() }
         let end = now.timeIntervalSince1970 * 1000, start = end - 300_000
+        // Preserve arbitrary test/clock rollback semantics after expired entries were evicted.
+        let update = await logger.ledgerUpdate(forceReset: previousWindowStart.map { start < $0 } ?? false)
+        if update.reset { cachedEvents.removeAll(keepingCapacity: true); historicalStart = nil }
+        guard update.validUTF8 else {
+            var empty = SIWCTrafficSnapshot(); empty.startedAt = startedAt
+            return empty
+        }
+        for line in update.completeLines {
+            guard let entry = decodeLedgerLine(line) else { continue }
+            let date = Date(timeIntervalSince1970: entry.time / 1000)
+            historicalStart = min(historicalStart ?? startedAt, date)
+            if entry.time > start { cachedEvents.append(entry) }
+        }
+        cachedEvents.removeAll { $0.time <= start }
+        previousWindowStart = start
+        // A valid last line without newline counts, but is provisional: appended
+        // bytes may change it. Never commit it until its newline arrives.
+        let trailing = update.trailingLine.flatMap { decodeLedgerLine($0) }
+        var events = cachedEvents
+        if let trailing { events.append(trailing) }
+        var result = SIWCTrafficSnapshot(); result.startedAt = startedAt
+        result.startedAt = min(startedAt, historicalStart ?? startedAt)
         var finished: Set<String> = []
         var latencies: [Int] = []
-        for line in lines {
-            guard let data = line.data(using: .utf8), let event = try? JSONDecoder().decode(JSONObject.self, from: data),
-                  case .number(let time)? = event["logged_at_unix_ms"] else { continue }
+        for (time, event) in events {
             result.startedAt = min(result.startedAt, Date(timeIntervalSince1970: time / 1000))
             guard time > start, time <= end else { continue }
             switch event.string("stage") {

@@ -32,8 +32,9 @@ public actor GatewayDaemon {
     public func snapshot() async -> DoctorSnapshot {
         let auth = await bridge.doctorStatus()
         let tracePath = await TraceLogger.shared.path
-        let recentTraceLines = await TraceLogger.shared.recentLines(limit: 8)
-        let traceDiagnostics = await TraceLogger.shared.diagnostics(limit: 64)
+        let traceSnapshot = await TraceLogger.shared.diagnosticSnapshot(tailLimit: 8, diagnosticLimit: 64)
+        let recentTraceLines = traceSnapshot.lines
+        let traceDiagnostics = traceSnapshot.diagnostics
         var snapshot = DoctorSnapshot(
             host: configuration.host,
             port: configuration.port,
