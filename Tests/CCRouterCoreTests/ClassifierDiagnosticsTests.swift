@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Redacted classifier diagnostics")
 struct ClassifierDiagnosticsTests {
+    @Test func failureMetadataRetainsCodesWithoutErrorMessagesOrBodies() throws {
+        let http = ResponsesHTTPError(statusCode: 429, body: #"{"error":{"code":"rate_limit_exceeded","message":"SECRET_SENTINEL"},"access_token":"SECRET_SENTINEL"}"#)
+        let fields = ClassifierDiagnostics.failureFields(http)
+        #expect(fields["http_status"]?.intValue == 429)
+        #expect(fields.string("error_code") == "rate_limit_exceeded")
+        #expect(!String(decoding: try JSONEncoder().encode(fields), as: UTF8.self).contains("SECRET_SENTINEL"))
+        let transport = ClassifierDiagnostics.failureFields(URLError(.networkConnectionLost))
+        #expect(transport["error_code"]?.intValue == URLError.networkConnectionLost.rawValue)
+        #expect(transport.string("error_domain") == NSURLErrorDomain)
+        let event = JSONObject.from(["type": .string("response.incomplete"), "response": .object(JSONObject.from([
+            "incomplete_details": .object(JSONObject.from(["reason": .string("max_output_tokens")])), "output": .string("SECRET_SENTINEL")]))])
+        #expect(ClassifierDiagnostics.failureFields(event).string("error_code") == "max_output_tokens")
+        #expect(!String(decoding: try JSONEncoder().encode(ClassifierDiagnostics.failureFields(event)), as: UTF8.self).contains("SECRET_SENTINEL"))
+    }
     @Test func errorCategoriesNeverReturnArbitraryDescriptions() {
         #expect(ClassifierDiagnostics.category(SIWCError.unsupported("SECRET_SENTINEL")) == "unsupported_capability")
         #expect(ClassifierDiagnostics.category(SIWCError.unsupported("Claude Code session identifier is required")) == "missing_session")

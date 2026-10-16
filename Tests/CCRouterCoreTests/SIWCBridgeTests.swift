@@ -12,7 +12,10 @@ private actor SIWCFixtureClient: ResponsesStreamingClient {
     func cancelRequest(_ id: UUID) { cancellations.append(id) }
     var cancelled: Int { cancellations.count }
     let scripts: [[JSONObject]]
-    init(_ scripts: [[JSONObject]]) { self.scripts = scripts }
+    let errorAfterEvents: (any Error)?
+    init(_ scripts: [[JSONObject]], errorAfterEvents: (any Error)? = nil) {
+        self.scripts = scripts; self.errorAfterEvents = errorAfterEvents
+    }
     func streamEvents(request: JSONObject, credentials: SubscriptionCredentials) async throws -> AsyncThrowingStream<JSONObject, Error> {
         if (request.array("input") ?? []).contains(where: { $0.objectValue?.string("role") == "system" }) {
             throw SIWCError.remote("system messages are not allowed")
@@ -21,7 +24,7 @@ private actor SIWCFixtureClient: ResponsesStreamingClient {
         let events = scripts[min(index, scripts.count - 1)]
         return AsyncThrowingStream { continuation in
             for event in events { continuation.yield(event) }
-            continuation.finish()
+            continuation.finish(throwing: errorAfterEvents)
         }
     }
     func perform(request: JSONObject, credentials: SubscriptionCredentials) async throws -> [JSONObject] { [] }
@@ -340,6 +343,44 @@ struct SIWCBridgeTests {
     }
     @Test func orphanedAdvisorResultsAreRejected() throws {
         #expect(throws: SIWCError.self) { try SIWCBridge.validateToolHistory([AnthropicMessage(role: "assistant", content: [JSONObject.from(["type": .string("advisor_tool_result"), "tool_use_id": .string("orphan"), "content": .object(JSONObject.from(["type": .string("advisor_result"), "text": .string("text")]))])])]) }
+    }
+    @Test(arguments: [false, true])
+    func completedResponseSurvivesLaterTransportFailure(_ withAdvisor: Bool) async throws {
+        let message = JSONObject.from(["type": .string("message"), "role": .string("assistant"),
+            "content": .array([.object(JSONObject.from(["type": .string("output_text"), "text": .string("Complete answer")]))])])
+        let client = SIWCFixtureClient([[done(message), completed]], errorAfterEvents: URLError(.networkConnectionLost))
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let tools = withAdvisor ? #"[{"type":"advisor_20260301","name":"advisor","model":"fixture"}]"# : Self.tools
+        let writer = SIWCFixtureWriter()
+        try await consume(bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#, tools: tools)), writer)
+        #expect(await writer.text.contains("Complete answer"))
+        #expect(await writer.text.contains("message_stop"))
+        #expect(await client.calls == 1)
+    }
+    @Test func advisorReviewAndExecutorResumeFinishBeforeTransportEOF() async throws {
+        let client = SIWCFixtureClient([[done(advisorCall()), completed], [done(message("Advice")), completed],
+            [done(message("Final answer")), completed]], errorAfterEvents: URLError(.networkConnectionLost))
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let writer = SIWCFixtureWriter()
+        try await consume(bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#, tools: advisorTools)), writer)
+        #expect(await writer.text.contains("Advice"))
+        #expect(await writer.text.contains("Final answer"))
+        #expect(await writer.text.contains("message_stop"))
+        #expect(await client.calls == 3)
+    }
+    @Test(arguments: [false, true])
+    func interruptedStreamReturnsStructuredError(_ partial: Bool) async throws {
+        let events = partial ? [JSONObject.from(["type": .string("response.output_text.delta"), "delta": .string("partial")])] : []
+        let client = SIWCFixtureClient([events], errorAfterEvents: URLError(.networkConnectionLost))
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let writer = SIWCFixtureWriter()
+        await #expect(throws: (any Error).self) { try await consume(bridge.handleMessages(request(#"[{"role":"user","content":"hello"}]"#)), writer) }
+        let text = await writer.text
+        #expect(text.contains("event: error"))
+        #expect(text.contains("api_error"))
+        #expect(!text.contains("message_stop"))
+        #expect(await bridge.pendingToolTurnsCount() == 0)
+        #expect(await client.calls == 1)
     }
     @Test func partialStreamIsNeverSuccessful() async throws {
         let client = SIWCFixtureClient([[JSONObject.from(["type": .string("response.output_text.delta"), "delta": .string("partial")])]])

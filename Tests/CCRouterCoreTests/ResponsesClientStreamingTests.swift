@@ -62,6 +62,14 @@ struct ResponsesClientStreamingTests {
 
     // MARK: - Tests
 
+    @Test(arguments: ["response.completed", "response.failed", "response.incomplete", "error"])
+    func strictParserStopsAtTerminalEventBeforeLaterTransportError(_ terminal: String) async throws {
+        let lines = ["data: {\"type\":\"\(terminal)\"}", ""]
+        let stream = ResponsesClient.parseStrictSSELines(MockLineSequence(lines: lines, errorAfterLast: URLError(.networkConnectionLost)))
+        let events = try await collect(stream)
+        #expect(events.count == 1)
+        #expect(events.first?.string("type") == terminal)
+    }
     @Test
     func yieldsEventPerDataLine() async throws {
         let lines = [

@@ -46,6 +46,16 @@ actor SIWCTraffic {
     func callStarted(id: UUID, role: String) async {
         await log(JSONObject.from(["stage": .string("model_call"), "id": .string(id.uuidString), "role": .string(role)]))
     }
+    func callFailure(id: UUID, role: String, fields: JSONObject) async {
+        var event = fields
+        event["stage"] = .string("model_failure")
+        event["event"] = .string("model_failure")
+        event["id"] = .string(id.uuidString)
+        event["role"] = .string(role)
+        if let diagnosticID = ClassifierDiagnostics.requestID { event["diagnostic_id"] = .string(diagnosticID) }
+        await log(event)
+        await ClassifierDiagnostics.log(event)
+    }
     func callFinished(id: UUID, role: String, started: Date, usage: JSONObject?, failed: Bool) async {
         var event = JSONObject.from(["stage": .string("model_result"), "id": .string(id.uuidString), "role": .string(role),
             "failed": .bool(failed), "duration_ms": .number(Date().timeIntervalSince(started) * 1000)])
@@ -154,7 +164,11 @@ struct TrafficResponsesClient: ResponsesStreamingClient {
         await traffic.callStarted(id: id, role: role)
         let stream: AsyncThrowingStream<JSONObject, Error>
         do { stream = try await base.streamEvents(request: request, credentials: credentials, requestID: requestID) }
-        catch { await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true); throw error }
+        catch {
+            await traffic.callFailure(id: id, role: role, fields: ClassifierDiagnostics.failureFields(error))
+            await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true)
+            throw error
+        }
         return AsyncThrowingStream { continuation in
             let task = Task {
                 var terminal = false
@@ -167,14 +181,21 @@ struct TrafficResponsesClient: ResponsesStreamingClient {
                         }
                         if ["response.failed", "response.incomplete", "error"].contains(event.string("type") ?? ""), !terminal {
                             terminal = true
+                            await traffic.callFailure(id: id, role: role, fields: ClassifierDiagnostics.failureFields(event))
                             await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true)
                         }
                         continuation.yield(event)
                     }
-                    if !terminal { await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true) }
+                    if !terminal {
+                        await traffic.callFailure(id: id, role: role, fields: ClassifierDiagnostics.failureFields(SIWCError.remote("interrupted_stream")))
+                        await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true)
+                    }
                     continuation.finish()
                 } catch {
-                    if !terminal { await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true) }
+                    if !terminal {
+                        await traffic.callFailure(id: id, role: role, fields: ClassifierDiagnostics.failureFields(error))
+                        await traffic.callFinished(id: id, role: role, started: started, usage: nil, failed: true)
+                    }
                     continuation.finish(throwing: error)
                 }
             }

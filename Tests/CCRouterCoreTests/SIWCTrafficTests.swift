@@ -3,6 +3,29 @@ import Testing
 @testable import CCRouterCore
 
 struct SIWCTrafficTests {
+    @Test func persistedFailureIncludesRoleCallIDAndGatewayCorrelation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let traceURL = directory.appendingPathComponent("trace.jsonl")
+        let traffic = SIWCTraffic(directory: directory), id = UUID()
+        await TraceLogger.$overrideFileURL.withValue(traceURL) {
+            await ClassifierDiagnostics.$requestID.withValue("fixture-request-id") {
+                await traffic.callFailure(id: id, role: "advisor", fields: ClassifierDiagnostics.failureFields(
+                    ResponsesHTTPError(statusCode: 503, body: #"{"error":{"code":"fixture_provider_failure","message":"SECRET_SENTINEL"}}"#)))
+            }
+        }
+        // The task-local trace override redirects both loggers into this
+        // isolated capture. The HTTP fixture separately checks traffic.jsonl.
+        for path in [traceURL] {
+            let text = try String(contentsOf: path, encoding: .utf8)
+            #expect(text.contains("fixture_provider_failure"))
+            #expect(text.contains("fixture-request-id"))
+            #expect(text.contains(id.uuidString))
+            #expect(text.contains("advisor"))
+            #expect(text.contains("503"))
+            #expect(!text.contains("SECRET_SENTINEL"))
+        }
+    }
     @Test func windowExpiresAndMetadataSurvivesRestartWithoutDoubleCounting() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

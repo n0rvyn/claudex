@@ -85,7 +85,10 @@ struct SIWCAdvisor: Sendable {
                                 }
                                 if item.string("type") == "function_call" { clientCalls = true }
                             }
-                            if event.string("type") == "response.completed" { completed = event; continue }
+                            if event.string("type") == "response.completed" { completed = event; break }
+                            if ["response.failed", "response.incomplete", "error"].contains(event.string("type") ?? "") {
+                                throw SIWCBridge.upstreamStreamFailure(event)
+                            }
                             continuation.yield(event)
                         }
                         try Task.checkCancellation()
@@ -109,7 +112,7 @@ struct SIWCAdvisor: Sendable {
                                 let review = try reviewPayload(executor: executor, output: raw, route: route)
                                 let events = try await advisorClient.streamEvents(request: review, credentials: credentials, requestID: requestID)
                                 var finalText = "", deltaText = "", done = false
-                                for try await event in events {
+                                reviewEvents: for try await event in events {
                                     try Task.checkCancellation()
                                     switch event.string("type") {
                                     case "response.output_text.delta": deltaText += event.string("delta") ?? ""
@@ -120,7 +123,8 @@ struct SIWCAdvisor: Sendable {
                                         done = true
                                         inputTokens += event.object("response")?.object("usage")?["input_tokens"]?.intValue ?? 0
                                         outputTokens += event.object("response")?.object("usage")?["output_tokens"]?.intValue ?? 0
-                                    case "response.failed", "response.incomplete", "error": throw SIWCError.remote("advisor_inference_failed")
+                                        break reviewEvents
+                                    case "response.failed", "response.incomplete", "error": throw SIWCBridge.upstreamStreamFailure(event)
                                     default: break
                                     }
                                 }

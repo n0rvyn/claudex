@@ -49,6 +49,33 @@ enum ClassifierDiagnostics {
         return "bridge_or_stream"
     }
 
+    /// Error metadata only. Never persist provider messages, response bodies,
+    /// NSError.userInfo, request contents or credential values.
+    static func failureFields(_ error: any Error) -> JSONObject {
+        var fields = JSONObject.from(["error_category": .string(category(error))])
+        if let http = error as? ResponsesHTTPError {
+            fields["http_status"] = .number(Double(http.statusCode))
+            if let data = http.body.data(using: .utf8),
+               let body = try? JSONDecoder().decode(JSONObject.self, from: data),
+               let code = body.object("error")?.string("code") ?? body.string("code") {
+                fields["error_code"] = .string(code)
+            }
+        } else if case SIWCError.remote(let code) = error {
+            fields["error_code"] = .string(code)
+        } else if !(error is SIWCError), !(error is DecodingError) {
+            let underlying = error as NSError
+            fields["error_code"] = .number(Double(underlying.code))
+            fields["error_domain"] = .string(underlying.domain)
+        }
+        return fields
+    }
+
+    static func failureFields(_ event: JSONObject) -> JSONObject {
+        var fields = failureFields(SIWCBridge.upstreamStreamFailure(event))
+        fields["upstream_event"] = event["type"]
+        return fields
+    }
+
     static func endpoint(_ path: String) -> String {
         // Unknown paths can contain credentials or user-controlled identifiers.
         let path = String(path.split(separator: "?", maxSplits: 1).first ?? "")
@@ -125,7 +152,9 @@ enum ClassifierDiagnostics {
                             await log(JSONObject.from(["event": .string("stream_finished"),
                                 "message_stop_seen": .bool(await observer.messageStopSeen)]))
                         } catch {
-                            await log(JSONObject.from(["event": .string("stream_failed"), "error_category": .string(category(error))]))
+                            var fields = failureFields(error)
+                            fields["event"] = .string("stream_failed")
+                            await log(fields)
                             throw error
                         }
                     }

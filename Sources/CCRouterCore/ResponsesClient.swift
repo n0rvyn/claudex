@@ -46,7 +46,11 @@ public actor ResponsesClient {
     public func cancelRequest(_ requestID: UUID) {
         activeRequests.removeValue(forKey: requestID)?.cancel()
     }
-    private func removeRequest(_ requestID: UUID) { activeRequests.removeValue(forKey: requestID) }
+    private func removeRequest(_ requestID: UUID, task: URLSessionTask) {
+        // Advisor and executor continuations reuse the lease. An older stream's
+        // termination must not remove the newer task's cancellation handle.
+        if activeRequests[requestID] === task { activeRequests.removeValue(forKey: requestID) }
+    }
     public func streamEvents(request payload: JSONObject, credentials: SubscriptionCredentials, requestID: UUID) async throws -> AsyncThrowingStream<JSONObject, Error> {
         let request = try makeRequest(payload: payload, credentials: credentials)
 
@@ -68,7 +72,7 @@ public actor ResponsesClient {
         activeRequests[requestID] = upstream
         return Self.parseStrictSSEBytes(bytes, onTermination: { [self] in
             upstream.cancel()
-            Task { await removeRequest(requestID) }
+            Task { await removeRequest(requestID, task: upstream) }
         })
     }
 
@@ -131,7 +135,14 @@ public actor ResponsesClient {
                                 let payload = dataLines.joined(separator: "\n")
                                 dataLines = []
                                 if payload != "[DONE]" {
-                                    continuation.yield(try JSONDecoder().decode(JSONObject.self, from: Data(payload.utf8)))
+                                    let event = try JSONDecoder().decode(JSONObject.self, from: Data(payload.utf8))
+                                    continuation.yield(event)
+                                    if ["response.completed", "response.failed", "response.incomplete", "error"].contains(event.string("type") ?? "") {
+                                        // The protocol terminal event ends this response, even
+                                        // when the HTTP connection remains open or fails later.
+                                        continuation.finish()
+                                        return
+                                    }
                                 }
                             }
                         } else if line.hasPrefix("data:") {

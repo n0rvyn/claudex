@@ -155,7 +155,7 @@ public actor SIWCBridge {
                         await client.cancelRequest(leaseID)
                         await clearInflight(key, leaseID: leaseID)
                         await traffic.gatewayFinished(id: observationID, started: observationStarted, failed: !(error is CancellationError), cancelled: error is CancellationError)
-                        if Self.isContextLimitError(error), let body = Self.error(error, status: 400).bodyData {
+                        if !(error is CancellationError), let body = Self.error(error, status: Self.isContextLimitError(error) ? 400 : 502).bodyData {
                             var frame = Data("event: error\ndata: ".utf8)
                             frame.append(body); frame.append(Data("\n\n".utf8))
                             try await writer.write(frame)
@@ -510,7 +510,7 @@ public actor SIWCBridge {
         var received: Set<String> = []
         var callOrder: [String: Int] = [:]
         var argumentsByItem: [String: String] = [:]
-        for try await event in stream {
+        eventLoop: for try await event in stream {
             try Task.checkCancellation()
             let type = event.string("type") ?? ""
             switch type {
@@ -593,8 +593,9 @@ public actor SIWCBridge {
                     result.inputTokens = usage["input_tokens"]?.intValue ?? inputTokens
                     result.outputTokens = usage["output_tokens"]?.intValue ?? 0
                 }
+                break eventLoop
             case "response.failed", "response.incomplete", "error":
-                throw SIWCError.remote(event.object("response")?.object("error")?.string("code") ?? event.object("error")?.string("code") ?? type)
+                throw Self.upstreamStreamFailure(event)
             default: break
             }
         }
@@ -609,6 +610,12 @@ public actor SIWCBridge {
         try await encoder.finish(stopReasonHint: result.hasTools ? .toolUse : .endTurn)
         return result
     }
+    static func upstreamStreamFailure(_ event: JSONObject) -> SIWCError {
+        .remote(event.object("response")?.object("error")?.string("code")
+            ?? event.object("error")?.string("code") ?? event.string("code")
+            ?? event.object("response")?.object("incomplete_details")?.string("reason")
+            ?? event.string("type") ?? "upstream_stream_failed")
+    }
     static func isContextLimitError(_ error: any Error) -> Bool {
         let codes: Set<String> = ["context_length_exceeded", "prompt_too_long"]
         if case SIWCError.remote(let code) = error { return codes.contains(code) }
@@ -619,7 +626,7 @@ public actor SIWCBridge {
         return codes.contains(code)
     }
     static func error(_ error: any Error, status: Int) -> HTTPResponse {
-        let type = status == 401 ? "authentication_error" : "invalid_request_error"
+        let type = status == 401 ? "authentication_error" : status >= 500 ? "api_error" : "invalid_request_error"
         let message: String
         if Self.isContextLimitError(error) {
             message = "prompt is too long: upstream model context window exceeded"
