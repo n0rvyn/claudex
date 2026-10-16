@@ -1,0 +1,115 @@
+[
+  {
+    "op": "test",
+    "path": "/routingTable",
+    "value": {
+      "allowClientEffort": false,
+      "fableRoute": {
+        "reasoningEffort": "low",
+        "textVerbosity": "medium",
+        "upstreamModel": "gpt-6.1-sol"
+      },
+      "fallback": {
+        "reasoningEffort": "low",
+        "textVerbosity": "medium",
+        "upstreamModel": "gpt-5.6-terra"
+      },
+      "rules": [
+        {
+          "match": "opus",
+          "route": {
+            "reasoningEffort": "low",
+            "textVerbosity": "high",
+            "upstreamModel": "gpt-6.1-sol"
+          }
+        },
+        {
+          "match": "sonnet",
+          "route": {
+            "reasoningEffort": "low",
+            "textVerbosity": "medium",
+            "upstreamModel": "gpt-6-luna"
+          }
+        },
+        {
+          "match": "haiku",
+          "route": {
+            "reasoningEffort": "low",
+            "textVerbosity": "low",
+            "upstreamModel": "gpt-5.6-terra"
+          }
+        }
+      ],
+      "singleModelMode": false
+    }
+  },
+  {
+    "op": "test",
+    "path": "/advisorRoute",
+    "value": {
+      "reasoningEffort": "medium",
+      "textVerbosity": "low",
+      "upstreamModel": "gpt-6.1-sol"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/effortPolicyVersion",
+    "value": 2
+  },
+  {
+    "op": "replace",
+    "path": "/routingTable/allowClientEffort",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/fallback/defaultClientEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/fallback/maxAllowedEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/fableRoute/defaultClientEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/fableRoute/maxAllowedEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/rules/0/route/defaultClientEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/rules/0/route/maxAllowedEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/rules/1/route/defaultClientEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/rules/1/route/maxAllowedEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/rules/2/route/defaultClientEffort",
+    "value": null
+  },
+  {
+    "op": "add",
+    "path": "/routingTable/rules/2/route/maxAllowedEffort",
+    "value": null
+  }
+]
