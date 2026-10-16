@@ -38,6 +38,6 @@ struct NativeSystemTurnTests {
         #expect(payload.array("input")?.last?.objectValue?.string("role") == "developer")
         let plain = AnthropicMessage(role: "system", content: value.messages[1].content)
         #expect(SIWCBridge.fingerprint([plain]) != SIWCBridge.fingerprint([value.messages[1]]))
-        #expect(throws: SIWCError.self) { try SIWCBridge.validateSystemTurns(value.messages, headers: [:]) }
+        try SIWCBridge.validateSystemTurns(value.messages, headers: [:])
     }
 }

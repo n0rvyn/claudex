@@ -5,6 +5,33 @@ import Testing
 
 @MainActor
 struct SettingsRoutingEditorTests {
+    @Test func followDraftSavePreservesDefaultsCapsAndModelIdentities() async {
+        let model = AppModelTestHelper.makeSUT()
+        model.allowClaudeAdjustment = true
+        model.useAdvancedRouting = true
+        model.routingRulesDraft = [RoutingRuleDraft(keyword: " opus ", upstreamModel: "gpt-5.4", effort: "low", verbosity: "high", defaultClientEffort: "medium", maxAllowedEffort: "high")]
+        model.fallbackRouteDraft.defaultClientEffort = "low"
+        model.fallbackRouteDraft.maxAllowedEffort = "medium"
+        model.fableRouteDraft.defaultClientEffort = "medium"
+        model.fableRouteDraft.maxAllowedEffort = "high"
+        await model.saveRoutingAndApply()
+        #expect(model.routingSaveError == nil)
+        let table = model.currentConfiguration.routingTable
+        #expect(table.rules[0].match == "opus")
+        #expect(table.rules[0].route.upstreamModel == "gpt-5.4")
+        #expect(table.rules[0].route.defaultClientEffort == "medium")
+        #expect(table.rules[0].route.maxAllowedEffort == "high")
+        #expect(table.fallback.maxAllowedEffort == "medium")
+        #expect(table.effectiveFableRoute.maxAllowedEffort == "high")
+        #expect(model.routingRulesDraft[0].maxAllowedEffort == "high")
+        model.routingRulesDraft[0].maxAllowedEffort = ""
+        model.routingRulesDraft[0].defaultClientEffort = ""
+        await model.saveRoutingAndApply()
+        #expect(model.currentConfiguration.routingTable.rules[0].route.maxAllowedEffort == nil)
+        #expect(model.currentConfiguration.routingTable.rules[0].route.defaultClientEffort == nil)
+        #expect(model.currentConfiguration.advisorRoute.reasoningEffort == "medium")
+    }
+
     // MARK: Add rule
 
     @Test
@@ -230,6 +257,7 @@ enum AppModelTestHelper {
         model.chatGPTAccounts = [SIWCAccountSummary(id: id, label: "Fixture", clientID: "fixture-client", active: true, authorized: true)]
         let models = ["gpt-5.4", "gpt-5.4-mini"].map { slug in
             SIWCModelSummary(id: slug, label: slug, accountID: id, details: JSONObject([
+                "default_reasoning_level": .string("medium"),
                 "supported_reasoning_levels": .array(["low", "medium", "high", "xhigh"].map { .object(JSONObject(["effort": .string($0)])) })
             ]))
         }

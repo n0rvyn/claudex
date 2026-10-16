@@ -51,16 +51,24 @@ public actor SIWCBridge {
             let input = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: request.body)
             try Self.validateSystemTurns(input.messages, headers: request.headers)
             let policy = routing
-            let effort = try EffortPolicy.clientEffort(input, headers: request.headers)
-            if policy.allowClientEffort == true { try EffortPolicy.validateAdjustment(requested: effort, thinking: input.thinking) }
             var route = policy.resolve(for: input.model)
-            if policy.allowClientEffort == true {
+            let isContinuation = input.messages.lastIndex(where: { $0.role == "assistant" }).map { index in
+                input.messages.suffix(from: index + 1).contains(where: { $0.content.contains(where: { $0.string("type") == "tool_result" }) })
+            } ?? false
+            if policy.allowClientEffort == true || isContinuation {
                 let credentials = try await auth.loadCurrent()
-                route = try EffortPolicy.resolve(route: route, requested: effort, thinking: input.thinking, catalog: await catalogProvider(credentials.accountID), accountID: credentials.accountID)
+                let session = request.headers["x-claude-code-session-id"] ?? Self.sessionFromMetadata(input.metadata)
+                route = try await resolveExecutorRoute(input, headers: request.headers, policy: policy, credentials: credentials, session: session).route
+            } else {
+                // Parse malformed effort controls consistently even when fixed effort is used.
+                _ = try EffortPolicy.clientEffort(input, headers: request.headers)
             }
             let payload = try Self.payload(input, route: route)
             return try HTTPResponse.json(value: CountTokensResult(input_tokens: try await counter.countInputTokens(for: payload)))
-        } catch { return Self.error(error, status: 400) }
+        } catch {
+            await ClassifierDiagnostics.effortFailure(error)
+            return Self.error(error, status: 400)
+        }
     }
     public func handleMessages(_ request: HTTPRequest) async -> HTTPResponse {
         let observationID = UUID(), observationStarted = Date()
@@ -76,23 +84,9 @@ public actor SIWCBridge {
             let scope = credentials.accountID + ":" + session
             let key = scope + ":" + Self.fingerprint(input.messages) + ":" + Self.contractFingerprint(input)
             try Self.validateToolHistory(input.messages)
-            let effort = try EffortPolicy.clientEffort(input, headers: request.headers)
-            if policy.allowClientEffort == true { try EffortPolicy.validateAdjustment(requested: effort, thinking: input.thinking) }
-            var route = policy.resolve(for: input.model)
-            var continuationPinned = false
-            var pinnedAdvisorRoute: ModelRoute?
-            if let lastAssistantIndex = input.messages.lastIndex(where: { $0.role == "assistant" }),
-               input.messages.suffix(from: lastAssistantIndex + 1).contains(where: { $0.content.contains(where: { $0.string("type") == "tool_result" }) }) {
-                guard let pending = try await loadReplay(Array(input.messages[...lastAssistantIndex]), scope: scope) else {
-                    throw SIWCError.remote("tool_continuation_replay_missing: restart from a user turn or restore the original tool history")
-                }
-                route = pending.route
-                pinnedAdvisorRoute = pending.advisorRoute
-                continuationPinned = true
-            }
-            if !continuationPinned, policy.allowClientEffort == true {
-                route = try EffortPolicy.resolve(route: route, requested: effort, thinking: input.thinking, catalog: await catalogProvider(credentials.accountID), accountID: credentials.accountID)
-            }
+            let resolution = try await resolveExecutorRoute(input, headers: request.headers, policy: policy, credentials: credentials, session: session)
+            let route = resolution.route
+            let pinnedAdvisorRoute = resolution.advisorRoute
             await ClassifierDiagnostics.resolved(route)
             var payload = try Self.payload(input, route: route)
             let advisor = try Self.effectiveTools(input).first(where: { $0.string("type") == "advisor_20260301" }).map(SIWCAdvisor.init)
@@ -170,6 +164,7 @@ public actor SIWCBridge {
                     }
                 })
         } catch {
+            await ClassifierDiagnostics.effortFailure(error)
             await traffic.gatewayFinished(id: observationID, started: observationStarted, failed: !(error is CancellationError), cancelled: error is CancellationError)
             let status: Int
             switch error {
@@ -184,6 +179,37 @@ public actor SIWCBridge {
     private func clearInflight(_ key: String, leaseID: UUID) {
         if inflight[key] == leaseID { inflight.removeValue(forKey: key) }
     }
+    /// Both count and inference paths use the same policy. Replay is authoritative within a tool turn.
+    private func resolveExecutorRoute(_ input: AnthropicMessagesRequest, headers: [String: String],
+                                      policy: ModelRoutingTable, credentials: SubscriptionCredentials,
+                                      session: String?) async throws -> (route: ModelRoute, advisorRoute: ModelRoute?) {
+        let effort = try EffortPolicy.clientEffort(input, headers: headers)
+        if policy.allowClientEffort == true { try EffortPolicy.validateAdjustment(requested: effort, thinking: input.thinking) }
+        var route = policy.resolve(for: input.model)
+        var advisor: ModelRoute?
+        var pinned = false
+        if let lastAssistantIndex = input.messages.lastIndex(where: { $0.role == "assistant" }),
+           input.messages.suffix(from: lastAssistantIndex + 1).contains(where: { $0.content.contains(where: { $0.string("type") == "tool_result" }) }) {
+            guard let session, !session.isEmpty else { throw SIWCError.unsupported("Claude Code session identifier is required for tool continuation replay") }
+            let scope = credentials.accountID + ":" + session
+            guard let pending = try await loadReplay(Array(input.messages[...lastAssistantIndex]), scope: scope) else {
+                throw SIWCError.remote("tool_continuation_replay_missing: restart from a user turn or restore the original tool history")
+            }
+            route = pending.route
+            advisor = pending.advisorRoute
+            pinned = true
+            // Claude Code can resend a changed effort while returning tool results.
+            // Finish the saved turn at its original effort; resolve current policy
+            // again when a new user turn starts.
+        }
+        if !pinned, policy.allowClientEffort == true {
+            route = try EffortPolicy.resolve(route: route, requested: effort, thinking: input.thinking,
+                                            catalog: await catalogProvider(credentials.accountID), accountID: credentials.accountID)
+        }
+        await ClassifierDiagnostics.effortResolution(requested: effort, route: route, follow: policy.allowClientEffort == true, pinned: pinned)
+        return (route, advisor)
+    }
+
     private func saveReplay(_ raw: [JSONValue], route: ModelRoute, advisorRoute: ModelRoute?, assistant: [JSONObject], history: [AnthropicMessage], scope: String, sessionPresent: Bool) async throws {
         guard sessionPresent else { return }
         let key = scope + ":" + Self.fingerprint(history + [AnthropicMessage(role: "assistant", content: assistant)])
@@ -318,20 +344,15 @@ public actor SIWCBridge {
         }
     }
     static func validateSystemTurns(_ messages: [AnthropicMessage], headers: [String: String]) throws {
-        let betas = Set((headers["anthropic-beta"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+        // Beta headers advertise client features; supported message shapes remain
+        // translatable when a retry omits those headers.
         for message in messages {
             if message.clear_at != nil {
                 guard message.role == "system", message.clear_at == "next_user_message", message.output_config == nil,
                       message.content.allSatisfy({ $0.string("type") == "text" }) else { throw SIWCError.unsupported("temporary system turn") }
             }
             guard message.role == "system" else { continue }
-            if !message.content.isEmpty || message.clear_at != nil {
-                guard betas.contains(EffortPolicy.systemMessageBeta) else { throw SIWCError.unsupported("mid-conversation system beta is required") }
-            }
             try validateSystemContent(message.content)
-            if message.content.contains(where: { ["tool_addition", "tool_removal"].contains($0.string("type") ?? "") }) {
-                guard betas.contains(EffortPolicy.toolChangesBeta) else { throw SIWCError.unsupported("mid-conversation tool changes beta is required") }
-            }
         }
     }
     private static func expiredSystemTurn(_ index: Int, in messages: [AnthropicMessage]) -> Bool {

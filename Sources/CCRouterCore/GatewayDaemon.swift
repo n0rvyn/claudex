@@ -12,6 +12,9 @@ public actor GatewayDaemon {
     }
 
     public func start() throws {
+        guard configuration.configurationWarning?.contains("configuration_load_failed:") != true else {
+            throw SIWCError.unsupported("configuration_load_failed: Existing configuration is invalid; gateway start is disabled")
+        }
         guard server == nil else { return }
 
         let bridge = self.bridge

@@ -22,12 +22,23 @@ public struct SIWCModelCatalogSnapshot: Codable, Sendable {
         guard windows.count == routes.count else { return nil }
         return windows.min()
     }
-    public func validationError(for route: ModelRoute) -> String? {
+    public func validationError(for route: ModelRoute, followClientEffort: Bool = false) -> String? {
         guard let model = models.first(where: { $0.id == route.upstreamModel }) else {
             return "Model \(route.upstreamModel) is unavailable to the selected account. Choose a model from the refreshed list."
         }
         guard !model.scalarReasoningEfforts.isEmpty else {
             return "Reasoning options for \(route.upstreamModel) were not supplied by the account. Refresh models before saving."
+        }
+        if followClientEffort {
+            let defaultEffort = route.defaultClientEffort ?? model.details.string("default_reasoning_level")
+            guard let defaultEffort, EffortPolicy.levels.contains(defaultEffort), model.scalarReasoningEfforts.contains(defaultEffort) else {
+                return "Choose a supported missing-effort default or refresh verified target default metadata."
+            }
+            if let cap = route.maxAllowedEffort, !EffortPolicy.levels.contains(cap) {
+                return "Choose a valid explicit maximum effort."
+            }
+            // A cap below the default is legal: omitted/auto requests explicitly reject rather than exceed it.
+            return nil
         }
         guard model.scalarReasoningEfforts.contains(route.reasoningEffort) else {
             return "Choose a supported reasoning effort for \(route.upstreamModel)."

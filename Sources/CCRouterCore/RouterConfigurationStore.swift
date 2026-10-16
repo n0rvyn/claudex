@@ -24,8 +24,17 @@ public struct RouterConfigurationStore {
         let writeWarning: String?
         let stored: StoredConfiguration
 
-        if let data = try? Data(contentsOf: storageURL),
-           let decoded = try? JSONDecoder().decode(StoredConfiguration.self, from: data) {
+        if fileManager.fileExists(atPath: storageURL.path) {
+            let decoded: StoredConfiguration
+            do {
+                decoded = try JSONDecoder().decode(StoredConfiguration.self, from: Data(contentsOf: storageURL))
+            } catch {
+                // Never overwrite a malformed/future policy with defaults or erase its spending limits.
+                let empty = try! JSONDecoder().decode(StoredConfiguration.self, from: Data("{}".utf8))
+                return resolveConfiguration(stored: normalizedConfiguration(from: empty), storageURL: storageURL,
+                                            homeWarning: homeWarning, locationWarning: location.warning,
+                                            writeWarning: "configuration_load_failed: Existing configuration was preserved; correct its format before starting.")
+            }
             let normalized = normalizedConfiguration(from: decoded)
             stored = normalized
             writeWarning = persist(configuration: normalized, to: storageURL)
@@ -75,6 +84,9 @@ public struct RouterConfigurationStore {
     }
 
     private func saveResult(configuration: RouterConfiguration) -> (configuration: RouterConfiguration, writeError: String?) {
+        guard configuration.configurationWarning?.contains("configuration_load_failed:") != true else {
+            return (configuration, "configuration_load_failed: Existing configuration must be repaired before saving; its contents were preserved.")
+        }
         let location = resolveConfigurationLocation()
         let stored = normalizedConfiguration(
             from: StoredConfiguration(
@@ -149,7 +161,9 @@ public struct RouterConfigurationStore {
             let baseRules = stored.routingTable?.rules ?? []
             routingTable = ModelRoutingTable(
                 rules: baseRules,
-                fallback: ModelRoute(upstreamModel: envExec, reasoningEffort: "xhigh", textVerbosity: "low"),
+                fallback: ModelRoute(upstreamModel: envExec, reasoningEffort: "xhigh", textVerbosity: "low",
+                                     defaultClientEffort: stored.routingTable?.fallback.defaultClientEffort,
+                                     maxAllowedEffort: stored.routingTable?.fallback.maxAllowedEffort),
                 singleModelMode: stored.routingTable?.singleModelMode,
                 allowClientEffort: stored.routingTable?.allowClientEffort,
                 fableRoute: stored.routingTable?.fableRoute

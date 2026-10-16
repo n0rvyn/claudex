@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Testing
 @testable import CCRouterCore
 
@@ -47,6 +48,11 @@ private actor SuspendedAdvisorClient: ResponsesStreamingClient {
     }
     func cancelRequest(_ id: UUID) { cancellations += 1; pending?.finish(throwing: CancellationError()) }
     func perform(request: JSONObject, credentials: SubscriptionCredentials) async throws -> [JSONObject] { [] }
+}
+private actor EffortFixtureCounter: AnthropicInputTokenCounting {
+    var payloads: [JSONObject] = []
+    func countInputTokens(for responsesPayload: JSONObject) -> Int { payloads.append(responsesPayload); return 1 }
+    func payload(_ index: Int) -> JSONObject { payloads[index] }
 }
 private actor SIWCFixtureWriter: HTTPBodyWriter {
     var chunks = Data()
@@ -607,6 +613,28 @@ struct SIWCBridgeTests {
             #expect(items[1].objectValue?.array("content")?.first?.objectValue?.string("text") == "Workspace instructions")
         }
     }
+    @Test(arguments: ["", EffortPolicy.claudeCodeMessageBeta])
+    func systemTurnsTranslateWithoutSystemBeta(_ beta: String) async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let counter = EffortFixtureCounter()
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client,
+                                counter: counter, replayStore: isolatedReplay())
+        let history = #"[{"role":"user","content":"one"},{"role":"system","content":[{"type":"text","text":"Permanent instruction"},{"type":"tool_addition","tool":{"type":"tool_definition","definition":{"name":"Write","input_schema":{"type":"object"}}}}]},{"role":"system","clear_at":"next_user_message","content":[{"type":"text","text":"Expired instruction"}]},{"role":"user","content":"two"},{"role":"system","clear_at":"next_user_message","content":[{"type":"text","text":"Current instruction"}]}]"#
+        let base = request(history)
+        let input = HTTPRequest(method: base.method, path: base.path,
+                                headers: base.headers.merging(["anthropic-beta": beta]) { _, new in new }, body: base.body)
+        #expect(await bridge.handleCountTokens(input).statusCode == 200)
+        let response = await bridge.handleMessages(input)
+        #expect(response.statusCode == 200)
+        try await consume(response, SIWCFixtureWriter())
+        let payload = await client.payload(0)
+        #expect(await payload == counter.payload(0))
+        let texts = (payload.array("input") ?? []).compactMap { $0.objectValue?.array("content")?.first?.objectValue?.string("text") }
+        #expect(texts.contains("Permanent instruction"))
+        #expect(texts.contains("Current instruction"))
+        #expect(!texts.contains("Expired instruction"))
+        #expect((payload.array("tools") ?? []).contains { $0.objectValue?.array("tools")?.contains { $0.objectValue?.string("name") == "Write" } == true })
+    }
     @Test func unsupportedNativeSystemContentCannotReachInference() async throws {
         let client = SIWCFixtureClient([[completed]])
         let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
@@ -621,6 +649,66 @@ struct SIWCBridgeTests {
             #expect(await bridge.handleMessages(native).statusCode == 400)
         }
         #expect(await client.calls == 0)
+    }
+    @Test func independentSessionsCanHaveConcurrentRequests() async throws {
+        let client = SIWCFixtureClient([[completed]])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay())
+        let history = #"[{"role":"user","content":"same prompt"}]"#
+        let first = await bridge.handleMessages(request(history, session: "session-one"))
+        let second = await bridge.handleMessages(request(history, session: "session-two"))
+        #expect(first.statusCode == 200)
+        #expect(second.statusCode == 200)
+        #expect(await bridge.pendingToolTurnsCount() == 2)
+        #expect(await bridge.handleMessages(request(history, session: "session-one")).statusCode == 409)
+        try await consume(first, SIWCFixtureWriter())
+        try await consume(second, SIWCFixtureWriter())
+        #expect(await bridge.pendingToolTurnsCount() == 0)
+    }
+    @Test func loopbackMessagesAcceptSystemTurnsAndChangedContinuationEffort() async throws {
+        let port = try reserveLoopbackPort()
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configuration = RouterConfiguration(environment: ["CC_ROUTER_PORT": String(port), "CC_ROUTER_CONFIG_PATH": home.appendingPathComponent("config.json").path], homeDirectoryURL: home)
+        let client = SIWCFixtureClient([[done(call("loopback_call", itemID: "loopback_item")), completed], [completed]])
+        let catalog = SIWCModelCatalogSnapshot(accountID: "account-fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "fixture-model", label: "Fixture", accountID: "account-fixture", details: JSONObject.from(["supported_reasoning_levels": .array(["low", "high"].map { .object(JSONObject.from(["effort": .string($0)])) })]))])
+        let bridge = SIWCBridge(configuration: configuration, auth: SIWCFixtureAuth(), client: client,
+                                replayStore: SIWCReplayStore(directory: home.appendingPathComponent("Replay")), catalogProvider: { _ in catalog })
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route, allowClientEffort: true), advisorRoute: Self.route)
+        let server = LocalHTTPServer(configuration: configuration) { request in
+            if request.path == "/v1/messages/count_tokens" { return await bridge.handleCountTokens(request) }
+            return await bridge.handleMessages(request)
+        }
+        try server.start()
+        defer { server.stop() }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while true {
+            switch server.listenerState {
+            case .ready: break
+            case .failed(let error): throw error
+            default:
+                guard ContinuousClock.now < deadline else { throw POSIXError(.ETIMEDOUT) }
+                try await Task.sleep(for: .milliseconds(10))
+                continue
+            }
+            break
+        }
+        func send(_ history: String, effort: String, path: String = "/v1/messages") async throws -> Int {
+            let fixture = effortRequest(history, effort: effort)
+            var wire = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
+            wire.httpMethod = "POST"; wire.httpBody = fixture.body
+            wire.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            wire.setValue("loopback-session", forHTTPHeaderField: "X-Claude-Code-Session-Id")
+            let (data, response) = try await URLSession.shared.data(for: wire)
+            let status = try #require((response as? HTTPURLResponse)?.statusCode)
+            #expect(status == 200, "\(String(decoding: data, as: UTF8.self))")
+            return status
+        }
+        let prefix = #"[{"role":"user","content":"read"},{"role":"system","content":[{"type":"text","text":"Workspace instruction"}]}]"#
+        #expect(try await send(prefix, effort: "low") == 200)
+        let next = String(prefix.dropLast()) + #",{"role":"assistant","content":[{"type":"tool_use","id":"loopback_call","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"loopback_call","content":"file"}]}]"#
+        #expect(try await send(next, effort: "high", path: "/v1/messages/count_tokens") == 200)
+        #expect(try await send(next, effort: "high") == 200)
+        #expect(await client.payload(1).object("reasoning")?.string("effort") == "low")
     }
     @Test func temporaryInstructionBoundaryCannotAliasPermanentLegacyReplay() async throws {
         let permanent = #"[{"role":"user","content":"one"},{"role":"system","content":[{"type":"text","text":"instruction"}]},{"role":"assistant","content":[{"type":"tool_use","id":"call_clear","name":"Read","input":{"path":"a"}}]}]"#
@@ -658,6 +746,52 @@ struct SIWCBridgeTests {
         #expect(await bridge.pendingToolTurnsCount() == 0)
     }
 
+    @Test func followPreservesHighAboveFixedLowAndCountUsesSameDefaults() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SIWCFixtureClient([[completed], [completed], [completed]])
+        let counter = EffortFixtureCounter()
+        let metadata = SIWCModelCatalogSnapshot(accountID: "account-fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "fixture-model", label: "Fixture", accountID: "account-fixture", details: JSONObject.from(["default_reasoning_level": .string("medium"), "supported_reasoning_levels": .array(EffortPolicy.levels.map { .object(JSONObject.from(["effort": .string($0)])) })]))])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, counter: counter, replayStore: SIWCReplayStore(directory: root), catalogProvider: { _ in metadata })
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route, allowClientEffort: true), advisorRoute: Self.route)
+        let history = #"[{"role":"user","content":"offline fixture"}]"#
+        try await consume(bridge.handleMessages(effortRequest(history, effort: "high")), SIWCFixtureWriter())
+        #expect(await client.payload(0).object("reasoning")?.string("effort") == "high")
+        for (index, input) in [request(history), effortRequest(history, effort: "auto")].enumerated() {
+            #expect(await bridge.handleCountTokens(input).statusCode == 200)
+            try await consume(bridge.handleMessages(input), SIWCFixtureWriter())
+            #expect(await counter.payload(index * 2 + 1).object("reasoning")?.string("effort") == "medium")
+            #expect(await client.payload(index + 1).object("reasoning")?.string("effort") == "medium")
+        }
+        let capped = ModelRoute(upstreamModel: "fixture-model", reasoningEffort: "low", textVerbosity: "low", maxAllowedEffort: "low")
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: capped, allowClientEffort: true), advisorRoute: Self.route)
+        for input in [request(history), effortRequest(history, effort: "high")] {
+            #expect(await bridge.handleCountTokens(input).statusCode == 400)
+            #expect(await bridge.handleMessages(input).statusCode == 400)
+        }
+        #expect(await client.calls == 3)
+    }
+
+    @Test func followExecutorDoesNotRaiseIndependentAdvisor() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SIWCFixtureClient([[done(advisorCall()), completed], [done(message("Advice")), completed], [done(call("pin_advisor", itemID: "pin_item")), completed], [completed]])
+        let counter = EffortFixtureCounter()
+        let catalog = SIWCModelCatalogSnapshot(accountID: "account-fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "fixture-model", label: "Fixture", accountID: "account-fixture", details: JSONObject.from(["default_reasoning_level": .string("medium"), "supported_reasoning_levels": .array(EffortPolicy.levels.map { .object(JSONObject.from(["effort": .string($0)])) })]))])
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, counter: counter, replayStore: SIWCReplayStore(directory: root), catalogProvider: { _ in catalog })
+        let advisor = ModelRoute(upstreamModel: "advisor-fixture", reasoningEffort: "low", textVerbosity: "low")
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route, allowClientEffort: true), advisorRoute: advisor)
+        let history = #"[{"role":"user","content":"offline advice"}]"#
+        let base = request(history, tools: advisorTools)
+        var body = try JSONDecoder().decode(JSONObject.self, from: base.body)
+        body["output_config"] = .object(JSONObject.from(["effort": .string("high")]))
+        try await consume(bridge.handleMessages(HTTPRequest(method: base.method, path: base.path, headers: base.headers, body: try JSONEncoder().encode(body))), SIWCFixtureWriter())
+        #expect(await client.payload(0).object("reasoning")?.string("effort") == "high")
+        #expect(await client.payload(1).string("model") == "advisor-fixture")
+        #expect(await client.payload(1).object("reasoning")?.string("effort") == "low")
+        #expect(await client.payload(2).object("reasoning")?.string("effort") == "high")
+    }
+
     private func effortRequest(_ history: String, effort: String, budget: Bool = false) -> HTTPRequest {
         let old = request(history)
         var body = try! JSONDecoder().decode(JSONObject.self, from: old.body)
@@ -675,16 +809,45 @@ struct SIWCBridgeTests {
     @Test func adjustedRouteIsPinnedAcrossClientAndRoutingChanges() async throws {
         let client = SIWCFixtureClient([[done(call("call_pin", itemID: "item_pin")), completed], [completed]])
         let catalog = SIWCModelCatalogSnapshot(accountID: "account-fixture", fetchedAt: Date(), models: [SIWCModelSummary(id: "fixture-model", label: "Fixture", accountID: "account-fixture", details: JSONObject.from(["supported_reasoning_levels": .array(["low", "medium", "high"].map { .object(JSONObject.from(["effort": .string($0)])) })]))])
-        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: SIWCReplayStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), catalogProvider: { _ in catalog })
+        let counter = EffortFixtureCounter()
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, counter: counter, replayStore: SIWCReplayStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), catalogProvider: { _ in catalog })
         let ceiling = ModelRoute(upstreamModel: "fixture-model", reasoningEffort: "high", textVerbosity: "low")
         await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: ceiling, allowClientEffort: true), advisorRoute: ceiling)
         try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"pin"}]"#, effort: "medium")), SIWCFixtureWriter())
         await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: ModelRoute(upstreamModel: "changed", reasoningEffort: "max", textVerbosity: "high"), allowClientEffort: true), advisorRoute: ceiling)
         try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"pin"},{"role":"assistant","content":[{"type":"tool_use","id":"call_pin","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_pin","content":"file"}]}]"#, effort: "low")), SIWCFixtureWriter())
+        #expect(await client.calls == 2)
+        #expect(await bridge.handleCountTokens(effortRequest(#"[{"role":"user","content":"pin"},{"role":"assistant","content":[{"type":"tool_use","id":"call_pin","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_pin","content":"file"}]}]"#, effort: "low")).statusCode == 200)
+        #expect(await bridge.handleCountTokens(effortRequest(#"[{"role":"user","content":"pin"},{"role":"assistant","content":[{"type":"tool_use","id":"call_pin","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_pin","content":"file"}]}]"#, effort: "auto")).statusCode == 200)
+        #expect(await counter.payload(1).object("reasoning")?.string("effort") == "medium")
+        #expect(await counter.payload(1).string("model") == "fixture-model")
+        try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"pin"},{"role":"assistant","content":[{"type":"tool_use","id":"call_pin","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_pin","content":"file"}]}]"#, effort: "medium")), SIWCFixtureWriter())
         #expect(await client.payload(0).object("reasoning")?.string("effort") == "medium")
         #expect(await client.payload(1).object("reasoning")?.string("effort") == "medium")
         #expect(await client.payload(1).string("model") == "fixture-model")
+        #expect(await client.payload(2).object("reasoning")?.string("effort") == "medium")
+        // A genuine new user turn resolves the current policy again.
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: ceiling, allowClientEffort: true), advisorRoute: ceiling)
+        try await consume(bridge.handleMessages(effortRequest(#"[{"role":"user","content":"new turn"}]"#, effort: "low")), SIWCFixtureWriter())
+        #expect(await client.payload(3).object("reasoning")?.string("effort") == "low")
     }
+    @Test func fixedCountAndMessagesRetainSavedContinuationRoute() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let client = SIWCFixtureClient([[done(call("fixed_pin", itemID: "fixed_item")), completed], [completed]])
+        let counter = EffortFixtureCounter()
+        let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, counter: counter, replayStore: SIWCReplayStore(directory: root))
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: Self.route), advisorRoute: Self.route)
+        try await consume(bridge.handleMessages(request(#"[{"role":"user","content":"fixed pin"}]"#)), SIWCFixtureWriter())
+        await bridge.updateRouting(table: ModelRoutingTable(rules: [], fallback: ModelRoute(upstreamModel: "changed", reasoningEffort: "high", textVerbosity: "high")), advisorRoute: Self.route)
+        let input = request(#"[{"role":"user","content":"fixed pin"},{"role":"assistant","content":[{"type":"tool_use","id":"fixed_pin","name":"Read","input":{"path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"fixed_pin","content":"file"}]}]"#)
+        #expect(await bridge.handleCountTokens(input).statusCode == 200)
+        #expect(await counter.payload(1).string("model") == "fixture-model")
+        #expect(await counter.payload(1).object("reasoning")?.string("effort") == "low")
+        try await consume(bridge.handleMessages(input), SIWCFixtureWriter())
+        #expect(await client.payload(1).object("reasoning")?.string("effort") == "low")
+    }
+
     @Test func unsupportedAdjustmentFailsBeforeInference() async throws {
         let client = SIWCFixtureClient([[completed]])
         let bridge = SIWCBridge(configuration: config(), auth: SIWCFixtureAuth(), client: client, replayStore: isolatedReplay(), catalogProvider: { _ in throw SIWCError.remote("metadata unavailable") })

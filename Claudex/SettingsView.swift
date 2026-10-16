@@ -524,16 +524,16 @@ private struct ClaudeCodeSettingsTab: View {
 private struct UpstreamSettingsTab: View {
     @ObservedObject var model: AppModel
     private var draftError: String? {
-        let route = ModelRoute(upstreamModel: model.fallbackRouteDraft.upstreamModel, reasoningEffort: model.fallbackRouteDraft.effort, textVerbosity: model.fallbackRouteDraft.verbosity)
+        let route = model.fallbackRouteDraft.route
         if !model.useAdvancedRouting, model.modelCatalogUsable {
             guard let selected = model.availableChatGPTModels.first(where: { $0.id == route.upstreamModel }) else {
                 return "Saved model \(route.upstreamModel) is unavailable. Choose an account model; saved settings stay intact until you apply changes."
             }
-            if !selected.scalarReasoningEfforts.contains(route.reasoningEffort) {
+            if !model.allowClaudeAdjustment && !selected.scalarReasoningEfforts.contains(route.reasoningEffort) {
                 return "Saved effort \(route.reasoningEffort.isEmpty ? "(none)" : route.reasoningEffort) is unavailable. Choose a supported reasoning effort."
             }
         }
-        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity) } + [ModelRoute(upstreamModel: model.fableRouteDraft.upstreamModel, reasoningEffort: model.fableRouteDraft.effort, textVerbosity: model.fableRouteDraft.verbosity)] : []) + [route, ModelRoute(upstreamModel: model.advisorRouteDraft.upstreamModel, reasoningEffort: model.advisorRouteDraft.effort, textVerbosity: model.advisorRouteDraft.verbosity)])
+        return model.routingCatalogError((model.useAdvancedRouting ? model.routingRulesDraft.map { ModelRoute(upstreamModel: $0.upstreamModel, reasoningEffort: $0.effort, textVerbosity: $0.verbosity, defaultClientEffort: $0.defaultClientEffort.isEmpty ? nil : $0.defaultClientEffort, maxAllowedEffort: $0.maxAllowedEffort.isEmpty ? nil : $0.maxAllowedEffort) } + [model.fableRouteDraft.route] : []) + [route]) ?? model.routingCatalogError([model.advisorRouteDraft.route], followClientEffort: false)
     }
     var body: some View {
         ScrollViewReader { proxy in
@@ -581,7 +581,7 @@ private struct UpstreamSettingsTab: View {
                         }
                     ))
                     Toggle("Allow Claude to adjust", isOn: $model.allowClaudeAdjustment)
-                    Text(model.allowClaudeAdjustment ? "Chosen effort is the default and maximum. Claude may request a lower supported effort. Thinking budgets cannot be translated." : "Chosen model and effort are fixed. Claude’s effort and thinking settings are overridden.")
+                    Text(model.allowClaudeAdjustment ? "Explicit client effort is preserved. Missing / auto uses the target model default unless you select a fallback. An optional maximum rejects higher requests; unsupported effort and thinking budgets are rejected." : "Chosen model and effort are fixed. Claude’s effort and thinking settings are overridden.")
                         .font(MBFont.caption).foregroundStyle(MBColor.inkDim)
                     MappingColumnHeader(adjustable: model.allowClaudeAdjustment)
                     if !model.useAdvancedRouting {
@@ -631,13 +631,15 @@ private struct ClaudeModelRouteRow: View {
     private var route: Binding<RouteDraft> {
         Binding(get: {
             guard let row = model.routingRulesDraft.first(where: { $0.keyword.lowercased() == keyword }) else { return model.fallbackRouteDraft }
-            return RouteDraft(upstreamModel: row.upstreamModel, effort: row.effort, verbosity: row.verbosity)
+            return RouteDraft(upstreamModel: row.upstreamModel, effort: row.effort, verbosity: row.verbosity, defaultClientEffort: row.defaultClientEffort, maxAllowedEffort: row.maxAllowedEffort)
         }, set: { value in
             model.prepareClaudeModelRows()
             guard let index = model.routingRulesDraft.firstIndex(where: { $0.keyword.lowercased() == keyword }) else { return }
             model.routingRulesDraft[index].upstreamModel = value.upstreamModel
             model.routingRulesDraft[index].effort = value.effort
             model.routingRulesDraft[index].verbosity = value.verbosity
+            model.routingRulesDraft[index].defaultClientEffort = value.defaultClientEffort
+            model.routingRulesDraft[index].maxAllowedEffort = value.maxAllowedEffort
         })
     }
     var body: some View {
@@ -704,13 +706,17 @@ private struct RoutingRuleDraftRow: View {
                         RouteDraft(
                             upstreamModel: draft.upstreamModel,
                             effort: draft.effort,
-                            verbosity: draft.verbosity
+                            verbosity: draft.verbosity,
+                            defaultClientEffort: draft.defaultClientEffort,
+                            maxAllowedEffort: draft.maxAllowedEffort
                         )
                     },
                     set: { route in
                         draft.upstreamModel = route.upstreamModel
                         draft.effort = route.effort
                         draft.verbosity = route.verbosity
+                        draft.defaultClientEffort = route.defaultClientEffort
+                        draft.maxAllowedEffort = route.maxAllowedEffort
                     }
                 ))
             }
@@ -852,12 +858,23 @@ private struct RouteDraftPickers: View {
                         if !efforts.contains(draft.effort) { draft.effort = "" }
                     }
                 }.frame(maxWidth: 350)
-                RoutePickerColumn(title: model.allowClaudeAdjustment ? "Default / maximum" : "Fixed effort") {
-                    Picker(model.allowClaudeAdjustment ? "Default / maximum effort" : "Fixed effort", selection: $draft.effort) {
-                        if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose effort" : "Unavailable").tag(draft.effort).disabled(true) }
+                RoutePickerColumn(title: model.allowClaudeAdjustment ? "Missing / auto" : "Fixed effort") {
+                    Picker(model.allowClaudeAdjustment ? "Missing / auto effort" : "Fixed effort", selection: Binding(get: { model.allowClaudeAdjustment ? draft.defaultClientEffort : draft.effort }, set: { if model.allowClaudeAdjustment { draft.defaultClientEffort = $0 } else { draft.effort = $0 } })) {
+                        if model.allowClaudeAdjustment { Text("Model default (" + (selected?.details.string("default_reasoning_level") ?? "unknown") + ")").tag("") }
+                        if !model.allowClaudeAdjustment && !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose effort" : "Unavailable").tag(draft.effort).disabled(true) }
+                        if model.allowClaudeAdjustment && !draft.defaultClientEffort.isEmpty && !efforts.contains(draft.defaultClientEffort) { Text("Unavailable fallback").tag(draft.defaultClientEffort).disabled(true) }
                         ForEach(efforts, id: \.self) { value in Text(value).tag(value) }
                     }.labelsHidden().focused($focusedField, equals: .effort).disabled(!model.modelCatalogUsable || efforts.isEmpty)
                 }.frame(maxWidth: 150)
+                if model.allowClaudeAdjustment {
+                    RoutePickerColumn(title: "Maximum (optional)") {
+                        Picker("Maximum allowed effort", selection: $draft.maxAllowedEffort) {
+                            Text("No cap").tag("")
+                            if !draft.maxAllowedEffort.isEmpty && !EffortPolicy.levels.contains(draft.maxAllowedEffort) { Text("Invalid maximum").tag(draft.maxAllowedEffort).disabled(true) }
+                            ForEach(EffortPolicy.levels, id: \.self) { Text($0).tag($0) }
+                        }.labelsHidden().disabled(!model.modelCatalogUsable)
+                    }.frame(maxWidth: 150)
+                }
                 if showVerbosity { RoutePickerColumn(title: "Response detail") {
                     Picker("Verbosity", selection: $draft.verbosity) {
                         ForEach(RoutingOptions.verbosities, id: \.self) { value in Text(value).tag(value) }
@@ -1072,15 +1089,43 @@ private struct SettingsWindowSizing: NSViewRepresentable {
     func updateNSView(_ nsView: WindowView, context: Context) {}
 }
 
+private enum MappingColumnSizing {
+    static let role: CGFloat = 76
+    static let arrow: CGFloat = 12
+    static let spacing: CGFloat = 10
+    static let modelMinimum: CGFloat = 120
+    static let modelMaximum: CGFloat = 280
+    static let clientEffort: CGFloat = 180
+    static let fixedEffort: CGFloat = 100
+    static let maximum: CGFloat = 100
+    static func minimumRowWidth(adjustable: Bool) -> CGFloat {
+        role + arrow + modelMinimum + (adjustable ? clientEffort + maximum : fixedEffort)
+        + spacing * (adjustable ? 5 : 4)
+    }
+}
+
 private struct MappingColumnHeader: View {
     let adjustable: Bool
     var body: some View {
-        HStack(spacing: 10) {
-            Text("Claude Code").frame(width: 76, alignment: .leading)
-            Color.clear.frame(width: 12, height: 1)
-            Text("OpenAI model").frame(maxWidth: .infinity, alignment: .leading)
-            Text(adjustable ? "Effort limit" : "Fixed effort").frame(width: 100, alignment: .leading)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: MappingColumnSizing.spacing) {
+                roleAndModel
+                Text(adjustable ? "Missing / auto" : "Fixed effort")
+                    .frame(width: adjustable ? MappingColumnSizing.clientEffort : MappingColumnSizing.fixedEffort, alignment: .leading)
+                if adjustable { Text("Maximum").frame(width: MappingColumnSizing.maximum, alignment: .leading) }
+                Spacer(minLength: 0)
+            }.frame(minWidth: MappingColumnSizing.minimumRowWidth(adjustable: adjustable))
+            HStack(spacing: MappingColumnSizing.spacing) {
+                roleAndModel
+                Spacer(minLength: 0)
+            }
         }.font(MBFont.captionB).foregroundStyle(MBColor.inkDim).padding(.top, 10)
+    }
+    @ViewBuilder private var roleAndModel: some View {
+        Text("Claude Code").frame(width: MappingColumnSizing.role, alignment: .leading)
+        Color.clear.frame(width: MappingColumnSizing.arrow, height: 1)
+        Text("OpenAI model").frame(minWidth: MappingColumnSizing.modelMinimum, idealWidth: MappingColumnSizing.modelMinimum,
+                                   maxWidth: MappingColumnSizing.modelMaximum, alignment: .leading)
     }
 }
 
@@ -1094,19 +1139,60 @@ private struct MappingRouteRow: View {
     private var selected: SIWCModelSummary? { model.availableChatGPTModels.first { $0.id == draft.upstreamModel } }
     private var efforts: [String] { selected?.scalarReasoningEfforts ?? [] }
     var body: some View {
-        HStack(spacing: 10) {
-            Text(title).font(.system(size: 13, weight: .semibold)).frame(width: 76, alignment: .leading)
-            Image(systemName: "arrow.right").font(.system(size: 11)).foregroundStyle(MBColor.inkFaint).frame(width: 12).accessibilityHidden(true)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: MappingColumnSizing.spacing) {
+                identityAndModel
+                effortPicker
+                if model.allowClaudeAdjustment { maximumPicker }
+                Spacer(minLength: 0)
+            }.frame(minWidth: MappingColumnSizing.minimumRowWidth(adjustable: model.allowClaudeAdjustment))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: MappingColumnSizing.spacing) {
+                    identityAndModel
+                    Spacer(minLength: 0)
+                }
+                HStack(alignment: .top, spacing: MappingColumnSizing.spacing) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.allowClaudeAdjustment ? "Missing / auto" : "Fixed effort").font(MBFont.captionB).foregroundStyle(MBColor.inkDim)
+                        effortPicker
+                    }
+                    if model.allowClaudeAdjustment {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Maximum").font(MBFont.captionB).foregroundStyle(MBColor.inkDim)
+                            maximumPicker
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }.padding(.vertical, 4).onChange(of: focus) { _, value in if value != nil { onFocus() } }
+    }
+    @ViewBuilder private var identityAndModel: some View {
+        Text(title).font(.system(size: 13, weight: .semibold)).frame(width: MappingColumnSizing.role, alignment: .leading)
+        Image(systemName: "arrow.right").font(.system(size: 11)).foregroundStyle(MBColor.inkFaint).frame(width: MappingColumnSizing.arrow).accessibilityHidden(true)
+        modelPicker
+    }
+    private var modelPicker: some View {
             Picker(title + " OpenAI model", selection: $draft.upstreamModel) {
                 if selected == nil { Text("Unavailable: " + draft.upstreamModel).tag(draft.upstreamModel).disabled(true) }
                 ForEach(model.availableChatGPTModels) { item in Text(item.label).tag(item.id) }
-            }.labelsHidden().frame(maxWidth: .infinity).focused($focus, equals: .model).disabled(!model.modelCatalogUsable)
+            }.labelsHidden().frame(minWidth: MappingColumnSizing.modelMinimum, idealWidth: MappingColumnSizing.modelMinimum, maxWidth: MappingColumnSizing.modelMaximum).focused($focus, equals: .model).disabled(!model.modelCatalogUsable)
                 .onChange(of: draft.upstreamModel) { _, _ in if !efforts.contains(draft.effort) { draft.effort = "" } }
-            Picker(title + (model.allowClaudeAdjustment ? " effort limit" : " fixed effort"), selection: $draft.effort) {
-                if !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose" : "Unavailable").tag(draft.effort).disabled(true) }
+    }
+    private var effortPicker: some View {
+            Picker(title + (model.allowClaudeAdjustment ? " missing / auto effort" : " fixed effort"), selection: Binding(get: { model.allowClaudeAdjustment ? draft.defaultClientEffort : draft.effort }, set: { if model.allowClaudeAdjustment { draft.defaultClientEffort = $0 } else { draft.effort = $0 } })) {
+                if model.allowClaudeAdjustment { Text("Model default (" + (selected?.details.string("default_reasoning_level") ?? "unknown") + ")").tag("") }
+                if !model.allowClaudeAdjustment && !efforts.contains(draft.effort) { Text(draft.effort.isEmpty ? "Choose" : "Unavailable").tag(draft.effort).disabled(true) }
+                if model.allowClaudeAdjustment && !draft.defaultClientEffort.isEmpty && !efforts.contains(draft.defaultClientEffort) { Text("Unavailable fallback").tag(draft.defaultClientEffort).disabled(true) }
                 ForEach(efforts, id: \.self) { Text($0).tag($0) }
-            }.labelsHidden().frame(width: 100).focused($focus, equals: .effort).disabled(!model.modelCatalogUsable || efforts.isEmpty)
-        }.padding(.vertical, 4).onChange(of: focus) { _, value in if value != nil { onFocus() } }
+            }.labelsHidden().frame(width: model.allowClaudeAdjustment ? MappingColumnSizing.clientEffort : MappingColumnSizing.fixedEffort).focused($focus, equals: .effort).disabled(!model.modelCatalogUsable || efforts.isEmpty)
+    }
+    private var maximumPicker: some View {
+                Picker(title + " maximum allowed effort", selection: $draft.maxAllowedEffort) {
+                    Text("No cap").tag("")
+                    if !draft.maxAllowedEffort.isEmpty && !EffortPolicy.levels.contains(draft.maxAllowedEffort) { Text("Invalid maximum").tag(draft.maxAllowedEffort).disabled(true) }
+                    ForEach(EffortPolicy.levels, id: \.self) { Text($0).tag($0) }
+                }.labelsHidden().frame(width: MappingColumnSizing.maximum).disabled(!model.modelCatalogUsable)
     }
 }
 

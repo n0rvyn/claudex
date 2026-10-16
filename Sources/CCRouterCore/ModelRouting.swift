@@ -7,10 +7,18 @@ public struct ModelRoute: Codable, Sendable, Equatable {
     public let reasoningEffort: String
     public let textVerbosity: String
 
-    public init(upstreamModel: String, reasoningEffort: String, textVerbosity: String) {
+    /// Used only when following a client that omits effort or sends auto. Nil uses verified target metadata.
+    public let defaultClientEffort: String?
+    /// An explicit spending policy, independent of model capabilities and fixed effort.
+    public let maxAllowedEffort: String?
+
+    public init(upstreamModel: String, reasoningEffort: String, textVerbosity: String,
+                defaultClientEffort: String? = nil, maxAllowedEffort: String? = nil) {
         self.upstreamModel = upstreamModel
         self.reasoningEffort = reasoningEffort
         self.textVerbosity = textVerbosity
+        self.defaultClientEffort = defaultClientEffort
+        self.maxAllowedEffort = maxAllowedEffort
     }
 }
 
@@ -43,10 +51,39 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
     public let fallback: ModelRoute
     /// Inactive advanced rules remain available when using one model. Nil preserves legacy behavior.
     public let singleModelMode: Bool?
-    /// Nil/false fixes effort; true treats each route effort as default and ceiling.
+    /// Nil/false fixes effort; true follows explicit client effort, with optional explicit caps.
     public let allowClientEffort: Bool?
     /// Explicit standard Fable mapping, after legacy ordered rules. Nil uses the existing fallback.
     public let fableRoute: ModelRoute?
+    public let effortPolicyVersion: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case rules, fallback, singleModelMode, allowClientEffort, fableRoute, effortPolicyVersion
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try values.decodeIfPresent(Int.self, forKey: .effortPolicyVersion) ?? 1
+        guard (1...2).contains(version) else {
+            throw DecodingError.dataCorruptedError(forKey: .effortPolicyVersion, in: values, debugDescription: "Unsupported effort policy version")
+        }
+        allowClientEffort = try values.decodeIfPresent(Bool.self, forKey: .allowClientEffort)
+        singleModelMode = try values.decodeIfPresent(Bool.self, forKey: .singleModelMode)
+        let migrate = version == 1 && allowClientEffort == true
+        func migrated(_ route: ModelRoute) -> ModelRoute {
+            guard migrate else { return route }
+            return ModelRoute(upstreamModel: route.upstreamModel, reasoningEffort: route.reasoningEffort,
+                              textVerbosity: route.textVerbosity,
+                              defaultClientEffort: route.defaultClientEffort ?? route.reasoningEffort,
+                              maxAllowedEffort: route.maxAllowedEffort ?? route.reasoningEffort)
+        }
+        rules = try values.decode([ModelRoutingRule].self, forKey: .rules).map {
+            ModelRoutingRule(match: $0.match, route: migrated($0.route))
+        }
+        fallback = migrated(try values.decode(ModelRoute.self, forKey: .fallback))
+        fableRoute = try values.decodeIfPresent(ModelRoute.self, forKey: .fableRoute).map(migrated)
+        effortPolicyVersion = 2
+    }
 
     public init(rules: [ModelRoutingRule], fallback: ModelRoute, singleModelMode: Bool? = nil, allowClientEffort: Bool? = nil, fableRoute: ModelRoute? = nil) {
         self.rules = rules
@@ -54,6 +91,7 @@ public struct ModelRoutingTable: Codable, Sendable, Equatable {
         self.singleModelMode = singleModelMode
         self.allowClientEffort = allowClientEffort
         self.fableRoute = fableRoute
+        self.effortPolicyVersion = 2
     }
 
     /// Resolves a Claude `model` string to a `ModelRoute`.

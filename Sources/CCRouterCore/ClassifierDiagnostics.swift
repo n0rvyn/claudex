@@ -13,6 +13,21 @@ enum ClassifierDiagnostics {
         await TraceLogger.shared.log(event)
     }
 
+    static func effortResolution(requested: String?, route: ModelRoute, follow: Bool, pinned: Bool) async {
+        let client = requested.map { EffortPolicy.levels.contains($0) || $0 == "auto" ? $0 : "unrecognized" } ?? "absent"
+        await log(JSONObject.from(["event": .string("effort_resolution"), "client_effort": .string(client),
+                                   "effective_effort": .string(EffortPolicy.levels.contains(route.reasoningEffort) ? route.reasoningEffort : "unrecognized"),
+                                   "source": .string(pinned ? "continuation" : !follow ? "fixed" : requested != nil && requested != "auto" ? "client" : route.defaultClientEffort != nil ? "explicit_default" : "target_default"),
+                                   "explicit_cap": .bool(route.maxAllowedEffort != nil)]))
+    }
+
+    static func effortFailure(_ error: any Error) async {
+        guard case SIWCError.unsupported(let reason) = error else { return }
+        let allowed = ["effort_model_unavailable", "effort_default_unknown", "effort_target_unsupported", "effort_cap_invalid", "effort_cap_exceeded", "effort_continuation_conflict"]
+        let category = allowed.first { reason.hasPrefix($0 + ":") }
+        if let category { await log(JSONObject.from(["event": .string("effort_rejected"), "reason": .string(category)])) }
+    }
+
     static func category(_ error: any Error) -> String {
         if error is CancellationError { return "cancelled" }
         if error is ResponsesHTTPError { return "upstream_http" }

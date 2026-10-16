@@ -3,6 +3,41 @@ import Foundation
 import Testing
 
 struct RouterConfigurationMigrationTests {
+    @Test func malformedEffortPolicyPreservesFileAndDisablesGateway() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("config.json")
+        for bad in [#"{"routingTable":{"effortPolicyVersion":999,"rules":[],"fallback":{"upstreamModel":"saved-model","reasoningEffort":"low","textVerbosity":"low"}}}"#,
+                    #"{"routingTable":{"effortPolicyVersion":2,"allowClientEffort":true,"rules":[],"fallback":{"upstreamModel":"saved-model","reasoningEffort":"low","textVerbosity":"low","maxAllowedEffort":7}}}"#] {
+            let bytes = Data(bad.utf8)
+            try bytes.write(to: file)
+            let config = RouterConfigurationStore(environment: ["CC_ROUTER_CONFIG_PATH": file.path], homeDirectoryURL: root).loadOrCreate()
+            #expect(try Data(contentsOf: file) == bytes)
+            #expect(config.configurationWarning?.contains("configuration_load_failed:") == true)
+            let store = RouterConfigurationStore(environment: ["CC_ROUTER_CONFIG_PATH": file.path], homeDirectoryURL: root)
+            #expect(throws: NSError.self) { try store.saveChecked(configuration: config) }
+            #expect(try Data(contentsOf: file) == bytes)
+            let daemon = GatewayDaemon(configuration: config)
+            await #expect(throws: SIWCError.self) { try await daemon.start() }
+        }
+    }
+
+    @Test func legacyFollowCapsSurviveStoreAndEnvironmentOverride() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("config.json")
+        let legacy = #"{"routingTable":{"allowClientEffort":true,"rules":[],"fallback":{"upstreamModel":"saved-model","reasoningEffort":"low","textVerbosity":"low"}}}"#
+        try Data(legacy.utf8).write(to: file)
+        let store = RouterConfigurationStore(environment: ["CC_ROUTER_CONFIG_PATH": file.path, "CC_ROUTER_EXECUTOR_MODEL": "override-model"], homeDirectoryURL: root)
+        let config = store.loadOrCreate()
+        #expect(config.routingTable.fallback.upstreamModel == "override-model")
+        #expect(config.routingTable.fallback.maxAllowedEffort == "low")
+        #expect(config.routingTable.fallback.defaultClientEffort == "low")
+        #expect(store.save(configuration: config).routingTable.fallback.maxAllowedEffort == "low")
+    }
+
     @Test
     func legacyFlatFieldsMigrateToSingleRuleFallback() throws {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

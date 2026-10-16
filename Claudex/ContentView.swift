@@ -44,19 +44,25 @@ struct RoutingRuleDraft: Identifiable, Equatable {
     var upstreamModel: String
     var effort: String
     var verbosity: String
+    var defaultClientEffort: String
+    var maxAllowedEffort: String
 
     init(
         id: UUID = UUID(),
         keyword: String,
         upstreamModel: String,
         effort: String,
-        verbosity: String
+        verbosity: String,
+        defaultClientEffort: String = "",
+        maxAllowedEffort: String = ""
     ) {
         self.id = id
         self.keyword = keyword
         self.upstreamModel = upstreamModel
         self.effort = effort
         self.verbosity = verbosity
+        self.defaultClientEffort = defaultClientEffort
+        self.maxAllowedEffort = maxAllowedEffort
     }
 }
 
@@ -64,6 +70,14 @@ struct RouteDraft: Equatable {
     var upstreamModel: String
     var effort: String
     var verbosity: String
+    var defaultClientEffort: String = ""
+    var maxAllowedEffort: String = ""
+
+    var route: ModelRoute {
+        ModelRoute(upstreamModel: upstreamModel, reasoningEffort: effort, textVerbosity: verbosity,
+                   defaultClientEffort: defaultClientEffort.isEmpty ? nil : defaultClientEffort,
+                   maxAllowedEffort: maxAllowedEffort.isEmpty ? nil : maxAllowedEffort)
+    }
 }
 
 enum RoutingOptions {
@@ -166,9 +180,11 @@ final class AppModel: ObservableObject {
         self.fallbackRouteDraft = RouteDraft(
             upstreamModel: configuration.routingTable.fallback.upstreamModel,
             effort: configuration.routingTable.fallback.reasoningEffort,
-            verbosity: configuration.routingTable.fallback.textVerbosity
+            verbosity: configuration.routingTable.fallback.textVerbosity,
+            defaultClientEffort: configuration.routingTable.fallback.defaultClientEffort ?? "",
+            maxAllowedEffort: configuration.routingTable.fallback.maxAllowedEffort ?? ""
         )
-        self.fableRouteDraft = RouteDraft(upstreamModel: configuration.routingTable.effectiveFableRoute.upstreamModel, effort: configuration.routingTable.effectiveFableRoute.reasoningEffort, verbosity: configuration.routingTable.effectiveFableRoute.textVerbosity)
+        self.fableRouteDraft = RouteDraft(upstreamModel: configuration.routingTable.effectiveFableRoute.upstreamModel, effort: configuration.routingTable.effectiveFableRoute.reasoningEffort, verbosity: configuration.routingTable.effectiveFableRoute.textVerbosity, defaultClientEffort: configuration.routingTable.effectiveFableRoute.defaultClientEffort ?? "", maxAllowedEffort: configuration.routingTable.effectiveFableRoute.maxAllowedEffort ?? "")
         self.advisorRouteDraft = RouteDraft(
             upstreamModel: configuration.advisorRoute.upstreamModel,
             effort: configuration.advisorRoute.reasoningEffort,
@@ -556,9 +572,9 @@ final class AppModel: ObservableObject {
         return modelCatalogUsable ? "Account models · updated " + stamp + " · cache valid for 1 hour"
             : "Model list stale · last updated " + stamp + " · refresh to discover changes"
     }
-    func routingCatalogError(_ routes: [ModelRoute]) -> String? {
+    func routingCatalogError(_ routes: [ModelRoute], followClientEffort: Bool? = nil) -> String? {
         guard modelCatalogUsable, let snapshot = modelCatalogSnapshot else { return "Refresh the selected account's model list before saving new routing choices." }
-        return routes.compactMap { snapshot.validationError(for: $0) }.first
+        return routes.compactMap { snapshot.validationError(for: $0, followClientEffort: followClientEffort ?? allowClaudeAdjustment) }.first
     }
     private var savedExecutorRoutes: [ModelRoute] {
         (currentConfiguration.routingTable.singleModelMode == true ? [] : currentConfiguration.routingTable.rules.map(\.route) + [currentConfiguration.routingTable.effectiveFableRoute]) + [currentConfiguration.routingTable.fallback]
@@ -575,7 +591,7 @@ final class AppModel: ObservableObject {
     var savedRoutingCatalogError: String? {
         guard let snapshot = modelCatalogSnapshot,
               snapshot.accountID == chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id else { return nil }
-        return savedExecutorRoutes.compactMap { snapshot.validationError(for: $0) }.first
+        return savedExecutorRoutes.compactMap { snapshot.validationError(for: $0, followClientEffort: currentConfiguration.routingTable.allowClientEffort == true) }.first
     }
     func loadChatGPTModelCatalog(force: Bool = true) async {
         guard let expectedAccount = chatGPTAccounts.first(where: { $0.active && $0.authorized })?.id,
@@ -677,7 +693,7 @@ final class AppModel: ObservableObject {
 
     func addRoutingRule() {
         routingRulesDraft.append(
-            RoutingRuleDraft(keyword: "", upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity)
+            RoutingRuleDraft(keyword: "", upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity, defaultClientEffort: fallbackRouteDraft.defaultClientEffort, maxAllowedEffort: fallbackRouteDraft.maxAllowedEffort)
         )
     }
 
@@ -732,7 +748,9 @@ final class AppModel: ObservableObject {
                 keyword: draft.keyword.trimmingCharacters(in: .whitespacesAndNewlines),
                 upstreamModel: draft.upstreamModel,
                 effort: draft.effort,
-                verbosity: draft.verbosity
+                verbosity: draft.verbosity,
+                defaultClientEffort: draft.defaultClientEffort,
+                maxAllowedEffort: draft.maxAllowedEffort
             )
         }
         guard !useAdvancedRouting || trimmedRules.allSatisfy({ !$0.keyword.isEmpty }) else {
@@ -749,25 +767,29 @@ final class AppModel: ObservableObject {
                     route: ModelRoute(
                         upstreamModel: draft.upstreamModel,
                         reasoningEffort: draft.effort,
-                        textVerbosity: draft.verbosity
+                        textVerbosity: draft.verbosity,
+                        defaultClientEffort: draft.defaultClientEffort.isEmpty ? nil : draft.defaultClientEffort,
+                        maxAllowedEffort: draft.maxAllowedEffort.isEmpty ? nil : draft.maxAllowedEffort
                     )
                 )
             },
             fallback: ModelRoute(
                 upstreamModel: fallbackRouteDraft.upstreamModel,
                 reasoningEffort: fallbackRouteDraft.effort,
-                textVerbosity: fallbackRouteDraft.verbosity
+                textVerbosity: fallbackRouteDraft.verbosity,
+                defaultClientEffort: fallbackRouteDraft.defaultClientEffort.isEmpty ? nil : fallbackRouteDraft.defaultClientEffort,
+                maxAllowedEffort: fallbackRouteDraft.maxAllowedEffort.isEmpty ? nil : fallbackRouteDraft.maxAllowedEffort
             ),
             singleModelMode: !useAdvancedRouting,
             allowClientEffort: allowClaudeAdjustment,
-            fableRoute: ModelRoute(upstreamModel: fableRouteDraft.upstreamModel, reasoningEffort: fableRouteDraft.effort, textVerbosity: fableRouteDraft.verbosity)
+            fableRoute: fableRouteDraft.route
         )
         let advisor = ModelRoute(
             upstreamModel: advisorRouteDraft.upstreamModel,
             reasoningEffort: advisorRouteDraft.effort,
             textVerbosity: advisorRouteDraft.verbosity
         )
-        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) + [table.effectiveFableRoute] : []) + [table.fallback] + (advisor == currentConfiguration.advisorRoute ? [] : [advisor])) {
+        if let error = routingCatalogError((useAdvancedRouting ? table.rules.map(\.route) + [table.effectiveFableRoute] : []) + [table.fallback]) ?? (advisor == currentConfiguration.advisorRoute ? nil : routingCatalogError([advisor], followClientEffort: false)) {
             routingSaveError = error; statusText = error; return
         }
 
@@ -898,7 +920,9 @@ final class AppModel: ObservableObject {
                 fallback: ModelRoute(
                     upstreamModel: executorModel,
                     reasoningEffort: existingTable.fallback.reasoningEffort,
-                    textVerbosity: existingTable.fallback.textVerbosity
+                    textVerbosity: existingTable.fallback.textVerbosity,
+                    defaultClientEffort: existingTable.fallback.defaultClientEffort,
+                    maxAllowedEffort: existingTable.fallback.maxAllowedEffort
                 ),
                 singleModelMode: existingTable.singleModelMode,
                 allowClientEffort: existingTable.allowClientEffort,
@@ -1059,15 +1083,19 @@ final class AppModel: ObservableObject {
                 keyword: rule.match,
                 upstreamModel: rule.route.upstreamModel,
                 effort: rule.route.reasoningEffort,
-                verbosity: rule.route.textVerbosity
+                verbosity: rule.route.textVerbosity,
+                defaultClientEffort: rule.route.defaultClientEffort ?? "",
+                maxAllowedEffort: rule.route.maxAllowedEffort ?? ""
             )
         }
         fallbackRouteDraft = RouteDraft(
             upstreamModel: configuration.routingTable.fallback.upstreamModel,
             effort: configuration.routingTable.fallback.reasoningEffort,
-            verbosity: configuration.routingTable.fallback.textVerbosity
+            verbosity: configuration.routingTable.fallback.textVerbosity,
+            defaultClientEffort: configuration.routingTable.fallback.defaultClientEffort ?? "",
+            maxAllowedEffort: configuration.routingTable.fallback.maxAllowedEffort ?? ""
         )
-        fableRouteDraft = RouteDraft(upstreamModel: configuration.routingTable.effectiveFableRoute.upstreamModel, effort: configuration.routingTable.effectiveFableRoute.reasoningEffort, verbosity: configuration.routingTable.effectiveFableRoute.textVerbosity)
+        fableRouteDraft = RouteDraft(upstreamModel: configuration.routingTable.effectiveFableRoute.upstreamModel, effort: configuration.routingTable.effectiveFableRoute.reasoningEffort, verbosity: configuration.routingTable.effectiveFableRoute.textVerbosity, defaultClientEffort: configuration.routingTable.effectiveFableRoute.defaultClientEffort ?? "", maxAllowedEffort: configuration.routingTable.effectiveFableRoute.maxAllowedEffort ?? "")
         advisorRouteDraft = RouteDraft(
             upstreamModel: configuration.advisorRoute.upstreamModel,
             effort: configuration.advisorRoute.reasoningEffort,
@@ -1077,7 +1105,7 @@ final class AppModel: ObservableObject {
 
     func prepareClaudeModelRows() {
         for keyword in ["opus", "sonnet", "haiku"] where !routingRulesDraft.contains(where: { $0.keyword.lowercased() == keyword }) {
-            routingRulesDraft.append(RoutingRuleDraft(keyword: keyword, upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity))
+            routingRulesDraft.append(RoutingRuleDraft(keyword: keyword, upstreamModel: fallbackRouteDraft.upstreamModel, effort: fallbackRouteDraft.effort, verbosity: fallbackRouteDraft.verbosity, defaultClientEffort: fallbackRouteDraft.defaultClientEffort, maxAllowedEffort: fallbackRouteDraft.maxAllowedEffort))
         }
     }
 
@@ -1187,7 +1215,7 @@ extension AppModel {
         model.authState = .ready; model.authText = "ChatGPT connected"; model.statusText = "Gateway paused"
         model.chatGPTAccounts = [SIWCAccountSummary(id: "demo-account", label: "Alex · Personal workspace", clientID: "fixture-client", active: true, authorized: true)]
         var json = """
-        {"accountID":"demo-account","fetchedAt":\(Date().timeIntervalSinceReferenceDate),"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","accountID":"demo-account","details":{"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"supports_parallel_tool_calls":true,"support_verbosity":true}},{"id":"gpt-6-sol","label":"GPT-6 Sol","accountID":"demo-account","details":{"supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}]}}]}
+        {"accountID":"demo-account","fetchedAt":\(Date().timeIntervalSinceReferenceDate),"models":[{"id":"gpt-6-luna","label":"GPT-6 Luna","accountID":"demo-account","details":{"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}],"supports_parallel_tool_calls":true,"support_verbosity":true}},{"id":"gpt-6-sol","label":"GPT-6 Sol","accountID":"demo-account","details":{"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}]}}]}
         """
         if state == "longMetadata" {
             let note = String(data: try! JSONEncoder().encode(String(repeating: "LONG_METADATA_WORD_", count: 600)), encoding: .utf8)!

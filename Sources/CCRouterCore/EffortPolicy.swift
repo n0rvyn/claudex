@@ -22,8 +22,8 @@ public enum EffortPolicy {
                       Set(control.values.keys) == Set(["effort"]), control.string("effort") != nil else {
                     throw SIWCError.unsupported("effort control requires a system message containing only output_config.effort")
                 }
-                guard message.content.isEmpty || (native && betas.contains(systemMessageBeta)) else {
-                    throw SIWCError.unsupported("nonempty effort control requires the native per-turn and mid-conversation system betas")
+                guard message.content.isEmpty || native else {
+                    throw SIWCError.unsupported("nonempty effort control requires the native per-turn beta")
                 }
                 if !message.content.isEmpty { try SIWCBridge.validateSystemContent(message.content) }
                 guard betas.contains(messageBeta) || betas.contains(claudeCodeMessageBeta) else {
@@ -55,21 +55,34 @@ public enum EffortPolicy {
         guard catalog.accountID == accountID, catalog.models.allSatisfy({ $0.accountID == accountID }) else {
             throw SIWCError.unsupported("verified model capabilities for the selected account are required; refresh models")
         }
-        guard let model = catalog.models.first(where: { $0.id == route.upstreamModel }),
-              let ceiling = levels.firstIndex(of: route.reasoningEffort), model.scalarReasoningEfforts.contains(route.reasoningEffort) else {
-            throw SIWCError.unsupported("choose an available model and explicit supported default / maximum effort")
+        guard let model = catalog.models.first(where: { $0.id == route.upstreamModel }) else {
+            throw SIWCError.unsupported("effort_model_unavailable: verified target model is required")
         }
         try validateAdjustment(requested: requested, thinking: thinking)
-        let limit: Int
+        let effort: String
         if let requested, requested != "auto" {
-            guard let index = levels.firstIndex(of: requested) else {
-                throw SIWCError.unsupported("unsupported Claude effort: " + requested + "; choose low, medium, high, xhigh, max or auto")
+            effort = requested
+        } else if let explicitDefault = route.defaultClientEffort {
+            effort = explicitDefault
+        } else {
+            guard let targetDefault = model.details.string("default_reasoning_level") else {
+                throw SIWCError.unsupported("effort_default_unknown: target default metadata or an explicit missing-effort default is required")
             }
-            limit = min(ceiling, index)
-        } else { limit = ceiling }
-        guard let effort = levels.prefix(limit + 1).last(where: { model.scalarReasoningEfforts.contains($0) }) else {
-            throw SIWCError.unsupported("model has no supported effort at or below the requested level; upward fallback is disabled")
+            effort = targetDefault
         }
-        return ModelRoute(upstreamModel: route.upstreamModel, reasoningEffort: effort, textVerbosity: route.textVerbosity)
+        guard levels.contains(effort), model.scalarReasoningEfforts.contains(effort) else {
+            throw SIWCError.unsupported("effort_target_unsupported: selected target does not support the requested/default effort; no downgrade was applied")
+        }
+        if let cap = route.maxAllowedEffort {
+            guard let ceiling = levels.firstIndex(of: cap), let index = levels.firstIndex(of: effort) else {
+                throw SIWCError.unsupported("effort_cap_invalid: choose an explicit scalar maximum")
+            }
+            guard index <= ceiling else {
+                throw SIWCError.unsupported("effort_cap_exceeded: requested/default effort exceeds the explicit maximum; no downgrade was applied")
+            }
+        }
+        return ModelRoute(upstreamModel: route.upstreamModel, reasoningEffort: effort,
+                          textVerbosity: route.textVerbosity, defaultClientEffort: route.defaultClientEffort,
+                          maxAllowedEffort: route.maxAllowedEffort)
     }
 }
